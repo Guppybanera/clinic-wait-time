@@ -18,6 +18,10 @@ LOW_OFFSET = 7            # low = W - 7, high = W + 8
 MIN_REMAINING = 2         # a visit in progress is assumed to have at least 2 minutes left
 MIN_COMPLETED_FOR_AVG = 3
 EXPECTED_ARRIVAL_WINDOW = timedelta(minutes=30)
+# Past opening time with no "Clinic open" tap, the delay so far is assumed to continue, but
+# only up to this much: beyond it, staff have more likely forgotten to tap than the clinic
+# is still shut, and an unbounded slip gives absurd times (the console prompts staff anyway).
+MAX_ASSUMED_SLIP_MIN = 60
 
 
 @dataclass(frozen=True)
@@ -87,7 +91,7 @@ def start_offset(day: DayInput) -> float:
             s = (day.opening_at - now).total_seconds() / 60
         else:
             # Past opening and nobody tapped "Clinic open": assume the delay so far continues.
-            s = (now - day.opening_at).total_seconds() / 60
+            s = min((now - day.opening_at).total_seconds() / 60, MAX_ASSUMED_SLIP_MIN)
     if day.delay_until and day.delay_until > now:
         s = max(s, (day.delay_until - now).total_seconds() / 60)
     return s
@@ -142,6 +146,12 @@ def estimate_all(day: DayInput, visits: list[VisitInput]) -> dict[int, Estimate]
 
         w = (start - now).total_seconds() / 60
         low, high = wait_range(w)
+        start_low = _round_clock(now + timedelta(minutes=low))
+        start_high = _round_clock(now + timedelta(minutes=high))
+        if v.state == "booked" and v.appointment_at and start_low < v.appointment_at:
+            # Never tell a booked patient to come earlier than their appointment.
+            start_low = v.appointment_at
+            start_high = v.appointment_at + timedelta(minutes=RANGE_WIDTH)
         results[v.id] = Estimate(
             visit_id=v.id,
             position=position if v.state == "waiting" else None,
@@ -149,8 +159,8 @@ def estimate_all(day: DayInput, visits: list[VisitInput]) -> dict[int, Estimate]
             low_min=low,
             high_min=high,
             expected_start=start,
-            start_low=_round_clock(now + timedelta(minutes=low)),
-            start_high=_round_clock(now + timedelta(minutes=high)),
+            start_low=start_low,
+            start_high=start_high,
         )
     return results
 

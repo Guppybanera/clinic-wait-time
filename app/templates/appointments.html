@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% set active = "appts" %}
+{% block title %}Appointments {{ d.isoformat() }}{% endblock %}
+{% block body %}
+<div class="inline noprint" style="margin-bottom:12px">
+  <a class="btn alt" href="/staff/appointments?date={{ prev.isoformat() }}" aria-label="Previous day">◀</a>
+  <h1 style="margin:0">{{ d.strftime('%A %d %B %Y') }}{% if d == today %} (today){% endif %}</h1>
+  <a class="btn alt" href="/staff/appointments?date={{ next.isoformat() }}" aria-label="Next day">▶</a>
+  <form method="get" action="/staff/appointments" class="inline"><input type="date" name="date" value="{{ d.isoformat() }}"><button class="alt small">Go</button></form>
+  {% if d != today %}<a class="btn alt" href="/staff/appointments">Today</a>{% endif %}
+  <a class="btn alt" href="/staff/appointments/print?date={{ d.isoformat() }}" target="_blank" style="margin-left:auto">Print day sheet</a>
+</div>
+
+<table>
+<tr><th style="width:80px">Time</th><th>Booking</th></tr>
+{% for t, vs in rows %}
+<tr>
+  <td><strong>{{ t|hm }}</strong></td>
+  <td>
+  {% for v in vs %}
+    <div class="inline" style="padding:4px 0;{{ 'opacity:.55' if v.state in ('cancelled','no_show') }}">
+      <span><strong>{{ short_name(v) }}</strong> · {{ phone_end(v) }}</span>
+      <span class="muted">{{ status_label(v) }}</span>
+      <span class="row-actions">
+      {% if v.state == 'booked' %}
+        {% if d == today %}<form method="post" action="/staff/visits/{{ v.id }}/check-in"><input type="hidden" name="next" value="/staff/appointments?date={{ d.isoformat() }}"><button class="small">Check in</button></form>{% endif %}
+        <form method="post" action="/staff/visits/{{ v.id }}/cancel" onsubmit="return confirm('Cancel this booking? No text is sent.')"><input type="hidden" name="next" value="/staff/appointments?date={{ d.isoformat() }}"><button class="warn small">Cancel</button></form>
+        {% if d == today and now > v.appointment_at %}<form method="post" action="/staff/visits/{{ v.id }}/no-show"><input type="hidden" name="next" value="/staff/appointments?date={{ d.isoformat() }}"><button class="warn small">No-show</button></form>{% endif %}
+      {% endif %}
+      {% if v.id in undo %}
+        <form method="post" action="/staff/visits/{{ v.id }}/undo"><input type="hidden" name="next" value="/staff/appointments?date={{ d.isoformat() }}"><button class="alt small" title="Undo the last action (within 2 minutes)">Undo</button></form>
+      {% endif %}
+      </span>
+      {% if v.state == 'booked' %}
+      <details><summary>Edit</summary>
+        <form method="post" action="/staff/appointments/{{ v.id }}/edit" class="inline" style="margin-top:6px">
+          <input type="date" name="d" value="{{ v.appointment_at.date().isoformat() }}">
+          <input type="time" name="t" value="{{ v.appointment_at|hm }}" step="300">
+          <input type="text" name="name" placeholder="New name (optional)" autocomplete="off">
+          <input type="tel" name="phone" placeholder="New phone (optional)" autocomplete="off">
+          <button class="small">Save</button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+  {% endfor %}
+  {% if d >= today and (d > today or t > now) %}
+    <details class="noprint"{% if not vs %} style="color:#555"{% endif %}><summary>{{ 'Book this slot' if not vs else 'Add another booking' }}</summary>
+      <form method="post" action="/staff/appointments" class="inline" style="margin-top:6px">
+        <input type="hidden" name="d" value="{{ d.isoformat() }}"><input type="hidden" name="t" value="{{ t|hm }}">
+        <input type="text" name="name" placeholder="Name" required autocomplete="off">
+        <input type="tel" name="phone" placeholder="Phone" required autocomplete="off">
+        <button>Book {{ t|hm }}</button>
+      </form>
+    </details>
+  {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

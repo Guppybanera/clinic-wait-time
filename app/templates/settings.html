@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set active = "settings" %}
+{% block title %}Settings{% endblock %}
+{% block body %}
+<h1>Clinic settings</h1>
+{% set labels = {
+  "clinic_name": "Clinic name (used in texts)", "clinic_phone": "Clinic phone (in texts and on the patient page)",
+  "default_visit_min": "Default visit length (min), until 3 visits are done today",
+  "slot_length_min": "Appointment slot length (min)", "default_opening_time": "Opening time",
+  "default_closing_time": "Closing time", "default_doctors": "Doctors expected per day",
+  "pre_arrival_lead_min": "Pre-arrival text, minutes before appointment",
+  "alert_threshold_min": "Delay text when estimate moves later by more than (min)",
+  "quiet_start": "No pre-arrival/delay texts after", "quiet_end": "…until",
+  "name_retention_days": "Delete names and phones after (days)",
+  "timing_retention_days": "Delete visit timings after (days)", "idle_lock_min": "Lock staff screens after idle (min)"} %}
+<form method="post" action="/staff/settings" class="card">
+<table>
+{% for k, kind in fields.items() %}
+{% set val = cfg|attr(k) %}
+<tr><td><label for="{{ k }}">{{ labels[k] }}</label></td>
+<td><input type="{{ kind }}" id="{{ k }}" name="{{ k }}"{% if kind == 'number' %} min="0"{% endif %} value="{{ val.strftime('%H:%M') if kind == 'time' else val }}"></td></tr>
+{% endfor %}
+</table>
+<p><button>Save settings</button></p>
+</form>
+
+<h2>Staff logins</h2>
+<table>
+<tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr>
+{% for u in users %}
+<tr><td>{{ u.name }}</td><td>{{ u.username }}</td><td>{{ u.role.replace('_', ' ') }}</td><td>{{ 'Active' if u.active else 'Inactive' }}</td>
+<td>{% if u.id != user.id %}<form method="post" action="/staff/settings/users/{{ u.id }}/toggle"><button class="alt small">{{ 'Deactivate' if u.active else 'Reactivate' }}</button></form>{% endif %}</td></tr>
+{% endfor %}
+</table>
+<form method="post" action="/staff/settings/users" class="card inline" style="margin-top:12px">
+<input type="text" name="name" placeholder="Full name" required>
+<input type="text" name="username" placeholder="Username" required autocomplete="off">
+<input type="password" name="password" placeholder="Password (8+ chars)" required autocomplete="new-password">
+<select name="role"><option value="front_desk">Front desk</option><option value="manager">Manager</option></select>
+<button>Add staff</button>
+</form>
+{% endblock %}

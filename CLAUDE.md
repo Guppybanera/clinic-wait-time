@@ -19,39 +19,21 @@ they'll wait. The full design is in `docs/SPEC.md` — read it before changing b
 
 ## Status
 
-Done (in this repo):
-- `app/config.py` — env settings (see `.env.example`).
-- `app/clock.py` — single `now()` in clinic-local naive time; `set_now()` for tests.
-- `app/db.py` — engine, session, `init_db()`.
-- `app/crypto.py` — encrypt/decrypt, phone normalisation, keyed `phone_hash` (last 10 digits) for
-  matching inbound SMS, `last4`.
-- `app/models.py` — all tables from the spec's Data model.
-- `app/estimator.py` — pure estimator (see notes below). **Not yet tested.**
+v1 is built and tested (`pytest -q`, ~1000 tests incl. a parametrised range sweep):
+estimator, queue service (`app/queue.py`), notifier + SMS outbox (`app/notifier.py`,
+`app/sms.py`, Twilio behind `SMS_BACKEND=twilio`), background job (`app/jobs.py`), staff
+login / console / appointments / settings, patient page + JSON, inbound SMS webhook (Twilio
+signature checked), dev outbox, CLI (`create-staff`, `seed-demo`), README, Dockerfile.
+`app/snapshot.py` reads today's state and runs the estimator for everyone else.
 
-To build next, in order:
-1. **Tests for the estimator** (`tests/test_estimator.py`): range is always ≤15 min; formula
-   case (everyone present) matches `W = S + (Σr + k·A)/D`; late opening (S); booked patient never
-   told earlier than appointment; overdue booked patient doesn't block waiting ones; D=0 safe.
-2. **Queue service** (`app/queue.py`): state machine booked → waiting → in_visit → done, plus
-   no_show / cancelled; every change writes `audit_log`, updates `clinic_days.last_staff_action_at`,
-   recomputes estimates, calls the notifier. Undo within 2 min using audit `from_state`.
-   Save `first_estimate_min` at check-in and `actual_wait_min` at start.
-3. **Notifier + SMS** (`app/notifier.py`, `app/sms.py`): pre-arrival (lead 90 min, respects quiet
-   hours by deferring), check-in, delay (expected start moved > threshold vs
-   `last_notified_start_at`, max one per 15 min), inbound WAIT reply (match by `phone_hash`;
-   unknown number → walk-in wait). **Every text contains the numbers, never a name.**
-4. **Background job** (`app/jobs.py`): every 60 s — due pre-arrival texts, outbox retries
-   (up to 30 min), recompute for time-based changes; nightly — clear expired link tokens,
-   null name/phone after 30 days, delete visits after 90 days, notifications after 30.
-5. **Routes + templates:** staff login (bcrypt, individual users, 5-min idle lock),
-   `/staff` console, `/staff/appointments` (day view, book, check in, edit, cancel, print sheet),
-   `/staff/settings` (manager), patient page `/w/{token}` (+ `/api/w/{token}` JSON),
-   `/api/sms/inbound`, `/dev/outbox` and a dev "send WAIT" form.
-6. **CLI** (`app/cli.py`): `create-staff`, `seed-demo`.
-7. **Checks against the spec's traceability table:** patient page < 200 KB (aim < 50 KB),
-   ≥ 18pt text, refresh 60 s with `<meta refresh>` fallback, no names in any patient response
-   or SMS body, altered tokens → "link not found".
-8. README, Dockerfile, push to GitHub.
+Not done yet / next candidates:
+- Audit entries for *viewing* (spec mentions "viewed"); only changes are audited now.
+- Per-doctor columns on the Appointments screen (one queue for the clinic in v1).
+- Languages other than English for texts and the patient page.
+- The JSON `/api/appointments`, `/api/visits/...` endpoints from the spec: staff screens
+  use plain form posts under `/staff/...` instead.
+- Real-world checks from the traceability table: Slow-3G load, outdoor readability,
+  timed bookings/check-ins, Twilio end to end.
 
 ## Implementation notes (differences from the spec's wording)
 
@@ -68,6 +50,14 @@ To build next, in order:
   code from earlier drafts isn't needed.
 - **One queue for the whole clinic** (per-doctor queues are an open question in the spec).
 - All datetimes are clinic-local and naive (single clinic). `CLINIC_TZ` defaults to Asia/Kolkata.
+- Past opening with no "Clinic open" tap, the assumed slip is capped at 60 min
+  (`MAX_ASSUMED_SLIP_MIN`); the first **Start visit** also marks the clinic open.
+- A booked patient's clock range never starts before their appointment.
+- No delay text to a patient expected within `alert_threshold_min` anyway (avoids noise
+  when staff simply haven't tapped yet). Quiet hours defer pre-arrival and delay texts.
+- `queue.py` functions commit, then flush the outbox. Staff screens use form posts with a
+  SameSite=strict session cookie; the console auto-refreshes with `?auto=1`, which doesn't
+  reset the idle lock.
 
 ## Conventions
 

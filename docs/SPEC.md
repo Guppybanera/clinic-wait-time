@@ -28,7 +28,7 @@ The system has eight parts: three screens, a queue service at the centre, an est
 
 ### 1. Patient status page
 
-- **URL:** `/w/{token}`, where `token` is a random 22-character string (128 bits). It can't be guessed, and it is not the visit code.
+- **URL:** `/w/{token}`, where `token` is a random 22-character string (128 bits). It can't be guessed.
 - **Content, top to bottom:** queue position ("3rd in line"), wait range ("about 20–35 min"), the word "Estimate", and "Updated 1 min ago". The clinic's phone number sits at the foot of the page. Nothing else is needed above the fold.
 - **Build:** server-rendered HTML with inline CSS. Text at least 18pt, dark on white, single column. No web fonts, images or third-party scripts. Target size under 50 KB, well inside the 200 KB limit.
 - **Refresh:** a small script calls `/api/w/{token}` every 60 seconds and updates the two numbers. If JavaScript is off, a `<meta http-equiv="refresh" content="60">` tag reloads the page instead.
@@ -63,7 +63,7 @@ The API both screens talk to. It owns the visit state machine and is the only pa
 
 ### 5. Estimator
 
-A pure function — no database writes, no side effects — that takes today's queue and returns a position and wait range for each waiting patient. The formula is in the Wait-time estimation section.
+A pure function — no database writes, no side effects — that takes today's queue and returns a position and wait range for each waiting patient. It is a small simulation that reduces to the formula in the Wait-time estimation section when everyone is present (see "How the estimator applies the formula").
 
 ### 6. Notifier
 
@@ -72,8 +72,8 @@ Decides who gets a text and sends it through the SMS provider.
 - **Every text carries the answer, not just a link.** The numbers are in the message itself, so a patient with no mobile data still gets them; the link is only for live updates.
 - **Pre-arrival (booked patients):** about 90 minutes before the appointment, sends "Your visit at \[Clinic\] is expected to start about 10:45–11:00. Reply WAIT for an update. Live: \[link\]".
 - **On check-in:** sends "You're checked in at \[Clinic\]. You're 3rd in line, about 20–35 min. Live: \[link\]". Walk-ins get their link here.
-- **On a worse estimate:** if a patient's midpoint estimate is more than 15 minutes later than the last one they were told, sends "The clinic is running behind. Your new estimate is about 45–60 min. \[link\]". This covers late opening and doctor delays too.
-- **Limits:** at most one delay text per patient every 15 minutes, and none after 8 pm, so a busy afternoon doesn't produce a flood of texts.
+- **On a worse estimate:** if a patient's expected start time is more than 15 minutes later than the last one they were told (by any text), sends "The clinic is running behind. Your new estimate is about 45–60 min. \[link\]". This covers late opening and doctor delays too.
+- **Limits:** at most one delay text per patient every 15 minutes, none during quiet hours (8 pm–7 am by default; pre-arrival texts due then are deferred to 7 am), and none to a patient expected to be seen within the next 15 minutes anyway, so a busy afternoon doesn't produce a flood of texts.
 - **Delivery:** a background job runs every minute, sends pre-arrival texts that are due, and retries any queued or failed sends.
 
 ### 7. SMS gateway (outside service)
@@ -123,7 +123,7 @@ Every flow goes through the queue service. The screens never talk to the databas
 **Flow E — Patient checks the page**
 
 1. The patient taps the link; the browser requests `/w/{token}`.
-2. The queue service looks up the visit by token and returns the page with position, range and "Updated" time. No name, no visit code.
+2. The queue service looks up the visit by token and returns the page with position, range and "Updated" time. No name.
 3. Every 60 seconds the page calls `/api/w/{token}` and redraws the two numbers. Because the estimate is recomputed on every staff action, the page is never more than 60 seconds behind the front desk.
 
 **Flow F — Patient with no mobile data or a basic phone**
@@ -131,13 +131,13 @@ Every flow goes through the queue service. The screens never talk to the databas
 1. Every text already contains the position and wait range, so a patient with no data has the answer without opening the link.
 2. For a fresh figure, the patient texts "WAIT" to the clinic number. This needs only a mobile signal.
 3. The SMS provider forwards the message to `POST /api/sms/inbound`.
-4. The queue service matches the sender's phone number to today's booked or waiting visit and replies with the current position and range (or expected start time, if not yet checked in). No name is included.
+4. The queue service matches the sender's phone number (by keyed hash of its last 10 digits, so it matches with or without a country code) to today's booked or waiting visit and replies with the current position and range (or expected start time, if not yet checked in). No name is included.
 5. A number with no visit today gets the current walk-in wait instead. With no mobile signal at all, the fallback is calling the clinic, whose number is in every text and on the page.
 
 **Flow G — Clinic opens late, or a doctor is delayed**
 
 1. Opening time is stored in config. Until staff tap **Clinic open**, every estimate counts from opening time, not from now.
-2. If opening time passes with no tap, the estimator adds the minutes since opening to every estimate, and the staff console prompts: "Clinic not marked open — running late?"
+2. If opening time passes with no tap, the estimator adds the minutes since opening to every estimate (capped at 60 minutes, since by then staff have more likely forgotten to tap), and the staff console prompts: "Clinic not marked open — running late?" The first **Start visit** of the day also marks the clinic open.
 3. Staff can tap **Running late** and enter a new time ("opening at 10:30") or a delay ("doctor delayed 30 min").
 4. The estimator shifts every booked and waiting patient's estimate.
 5. The notifier texts everyone whose estimate moved by more than 15 minutes, including booked patients who haven't left home yet.
@@ -148,7 +148,7 @@ The estimate is a simple formula based on today's real visit lengths, recomputed
 
 **Inputs**
 
-- **S** — minutes until doctors start seeing patients. Before **Clinic open** is tapped, it is opening time minus now (or minutes past opening, if late), plus any **Running late** delay staff entered. Once the clinic is open and running, S = 0.
+- **S** — minutes until doctors start seeing patients. Before **Clinic open** is tapped, it is opening time minus now (or minutes past opening, up to 60, if late). A **Running late** entry sets a time before which nobody is seen (`delay_until`), and S is at least the minutes until then. Once the clinic is open and running, S = 0.
 - **A** — average visit length today, in minutes: the mean of today's completed visits. Until 3 visits have completed, use the clinic's default (set in config, e.g. 15 min).
 - **D** — doctors in session, from the staff console selector. Before opening, use the number expected that day from config, so the formula never divides by zero.
 - **k** — patients ahead of this one: those already `waiting`, plus booked patients with an earlier appointment who are expected to arrive first.
@@ -169,6 +169,10 @@ In words: any wait for the clinic to open, plus the time left on visits in progr
 - **Booked patients not yet arrived** see an expected start time: the later of their appointment time and now + W, shown as a 15-minute clock range ("about 10:45–11:00"). A booked patient is never told to come earlier than their appointment.
 - **Queue order (v1):** booked patients by appointment time once checked in; walk-ins by check-in time, filling gaps between appointments. Exactly how walk-ins slot in is an open question for the clinic.
 
+**How the estimator applies the formula**
+
+The estimator is a small simulation rather than the bare formula. Each of the D doctors becomes free at some time (now plus r for a visit in progress, or now plus S if the clinic hasn't started). Patients are taken in queue order — booked patients by appointment time, walk-ins by check-in time — and each starts when the earliest doctor is free, and, for a booked patient who hasn't arrived, not before their appointment. That doctor is then busy for A minutes. When everyone ahead is already in the waiting room this gives exactly W = S + (Σr + k·A)/D; it also handles gaps between appointments (walk-ins fill them) and booked patients who haven't arrived yet. A booked patient more than 30 minutes past their appointment who hasn't arrived no longer holds a place: they're estimated at the back of the line. There is one queue for the whole clinic.
+
 **Measuring accuracy (the ±15 min, 80% target)**
 
 1. At check-in, the estimator's midpoint W is saved on the visit as `first_estimate_min`.
@@ -182,11 +186,11 @@ Six tables. Name and phone are the only personal details; both are encrypted, sh
 
 | Table | Key fields | Purpose | Kept for |
 | --- | --- | --- | --- |
-| `visits` | `id`, `patient_name_encrypted`, `phone_encrypted`, `appointment_at` (empty for walk-ins), `doctor`, `type` (booked / walk-in), `state` (booked / waiting / in\_visit / done / no\_show / cancelled), `link_token` (random, 128-bit), `pre_arrival_sent_at`, `checked_in_at`, `started_at`, `ended_at`, `first_estimate_min`, `actual_wait_min`, `last_notified_mid_min` | One row per appointment or walk-in; drives the Appointments screen, the queue and the patient page | Link token cleared at midnight on the visit day; name and phone deleted after 30 days; timing fields kept 90 days for accuracy reporting |
-| `clinic_days` | `date`, `opening_time`, `opened_at`, `delay_min`, `doctors_expected`, `doctors_in_session` | Each day's opening, late-start and staffing, used by the estimator | 90 days |
+| `visits` | `id`, `patient_name_encrypted`, `phone_encrypted`, `appointment_at` (empty for walk-ins), `doctor`, `type` (booked / walk-in), `state` (booked / waiting / in\_visit / done / no\_show / cancelled), `link_token` (random, 128-bit), `pre_arrival_sent_at`, `checked_in_at`, `started_at`, `ended_at`, `first_estimate_min`, `actual_wait_min`, `last_notified_start_at`, `last_delay_text_at`, `phone_hash` (keyed hash of the last 10 digits, for matching WAIT texts), `phone_last4` | One row per appointment or walk-in; drives the Appointments screen, the queue and the patient page | Link token cleared at midnight on the visit day; name and phone deleted after 30 days; timing fields kept 90 days for accuracy reporting |
+| `clinic_days` | `date`, `opening_time`, `closing_time`, `opened_at`, `delay_until`, `doctors_expected`, `doctors_in_session`, `last_staff_action_at` | Each day's opening, late-start and staffing, used by the estimator | 90 days |
 | `clinic_config` | `default_visit_min`, `slot_length_min`, `default_opening_time`, `pre_arrival_lead_min` (90), `alert_threshold_min` (15), `quiet_hours`, `clinic_sms_number`, `clinic_phone` | Settings the manager can change without code | Permanent |
 | `notifications` | `id`, `visit_id`, `kind` (pre-arrival / check-in / delay / reply), `status` (queued / sent / failed), `attempts`, `sent_at` | Outbox for the notifier; lets failed texts retry | 30 days |
-| `audit_log` | `id`, `staff_user`, `visit_id`, `action`, `at` | Who booked, viewed or changed what, for Undo and privacy reviews | 1 year |
+| `audit_log` | `id`, `staff_user`, `visit_id`, `action`, `from_state`, `to_state`, `undone`, `at` | Who booked, viewed or changed what, for Undo and privacy reviews | 1 year |
 | `staff_users` | `id`, `name`, `password_hash`, `role` (front desk / manager), `active` | Individual logins, so every action is traceable to a person | While employed |
 
 `daily_accuracy` (date, visits counted, % within 15 min) can be a fifth small table or a database view over `visits`.

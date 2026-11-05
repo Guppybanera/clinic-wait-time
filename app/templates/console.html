@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% set active = "console" %}
+{% block title %}Today's queue{% endblock %}
+{% block body %}
+<script>
+// Refresh every 30 s (without counting as activity, so the idle lock still works),
+// but never while someone is typing.
+setInterval(function(){
+  var busy=[].some.call(document.querySelectorAll("input[type=text],input[type=tel],input[type=time],input[type=number]"),
+    function(i){return i.value||i===document.activeElement;});
+  if(!busy&&navigator.onLine)location.replace("/staff?auto=1");
+},30000);
+</script>
+
+{% if texts_delayed %}<div class="banner">Texts delayed — the SMS provider isn't accepting messages. They'll retry for 30 minutes.</div>{% endif %}
+
+<div class="card">
+  <div class="inline">
+    {% if day.opened_at %}
+      <strong>Clinic open since {{ day.opened_at|hm }}</strong>
+    {% else %}
+      <form method="post" action="/staff/clinic/open"><button>Clinic open</button></form>
+      <span>Opening time {{ day.opening_time.strftime('%H:%M') }}</span>
+    {% endif %}
+    {% if day.delay_until and day.delay_until > now %}
+      <span class="banner" style="margin:0">Running late until {{ day.delay_until|hm }}</span>
+      <form method="post" action="/staff/clinic/clear-delay"><button class="alt small">Clear delay</button></form>
+    {% endif %}
+    <span style="margin-left:auto">Doctors in session:</span>
+    {% for n in (1, 2, 3) %}
+      <form method="post" action="/staff/clinic/doctors"><input type="hidden" name="n" value="{{ n }}">
+      <button class="{{ '' if day.doctors_in_session == n else 'alt' }}">{{ n }}</button></form>
+    {% endfor %}
+  </div>
+  {% if not_open_late %}<p class="banner" style="margin:12px 0 0">Clinic not marked open — running late? Tap <b>Clinic open</b>, or enter a delay below.</p>{% endif %}
+  <details style="margin-top:10px"{% if not_open_late %} open{% endif %}>
+    <summary>Running late…</summary>
+    <form method="post" action="/staff/clinic/late" class="inline" style="margin-top:8px">
+      <label>Opening at <input type="time" name="opening"></label>
+      <span>or</span>
+      <label>Doctor delayed <input type="number" name="delay" min="1" max="600"> min</label>
+      <button>Save</button>
+    </form>
+  </details>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Walk-in check in</h2>
+  <form method="post" action="/staff/walk-in" class="inline">
+    <input type="text" name="name" placeholder="Name" required autocomplete="off">
+    <input type="tel" name="phone" placeholder="Phone" required autocomplete="off">
+    <button>Check in</button>
+  </form>
+  <p class="muted">Walk-in wait now: about {{ walk_in_wait.low_min }}–{{ walk_in_wait.high_min }} min</p>
+</div>
+
+<h2>In the clinic ({{ in_room|length }})</h2>
+{% if in_room %}
+<table>
+<tr><th>#</th><th>Name</th><th>Phone</th><th>Type</th><th>Wait so far</th><th>Estimate</th><th></th></tr>
+{% for v in in_room %}
+{% set e = ests.get(v.id) %}
+<tr class="{{ 'amber' if v.id in overrun }}">
+  <td>{% if v.state == 'in_visit' %}—{% else %}{{ e.position if e else '' }}{% endif %}</td>
+  <td><strong>{{ full_name(v) }}</strong></td>
+  <td>{{ phone_end(v) }}</td>
+  <td>{{ 'Booked ' ~ (v.appointment_at|hm) if v.appointment_at else 'Walk-in' }}</td>
+  <td>{% if v.state == 'in_visit' %}In visit {{ ((now - v.started_at).total_seconds() // 60)|int }} min
+      {% if v.id in overrun %}<br><b>Still in progress?</b>{% endif %}
+      {% else %}{{ ((now - v.checked_in_at).total_seconds() // 60)|int }} min{% endif %}</td>
+  <td>{% if e %}{{ e.low_min }}–{{ e.high_min }} min{% endif %}</td>
+  <td><div class="row-actions">
+    {% if v.state == 'waiting' %}
+      <form method="post" action="/staff/visits/{{ v.id }}/start"><button>Start visit</button></form>
+      <form method="post" action="/staff/visits/{{ v.id }}/no-show"><button class="warn small">No-show</button></form>
+    {% else %}
+      <form method="post" action="/staff/visits/{{ v.id }}/end"><button>End visit</button></form>
+    {% endif %}
+    {% if v.id in undo %}<form method="post" action="/staff/visits/{{ v.id }}/undo"><button class="alt small">Undo</button></form>{% endif %}
+  </div></td>
+</tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">Nobody checked in.</p>{% endif %}
+
+{% if recent %}
+<h2>Just finished</h2>
+<table>
+{% for v in recent %}
+<tr><td>{{ full_name(v) }}</td><td>{{ phone_end(v) }}</td><td>{{ status_label(v) }}</td>
+<td><form method="post" action="/staff/visits/{{ v.id }}/undo"><button class="alt small">Undo</button></form></td></tr>
+{% endfor %}
+</table>
+{% endif %}
+
+<h2>Booked, not arrived ({{ arriving|length }})</h2>
+{% if arriving %}
+<table>
+{% for v in arriving %}
+{% set e = ests.get(v.id) %}
+<tr><td>{{ v.appointment_at|hm }}</td><td>{{ full_name(v) }}</td><td>{{ phone_end(v) }}</td><td>{{ status_label(v) }}</td>
+<td>{% if e %}expected {{ e.start_low|hm }}–{{ e.start_high|hm }}{% endif %}</td>
+<td><div class="row-actions">
+<form method="post" action="/staff/visits/{{ v.id }}/check-in"><button>Check in</button></form>
+<form method="post" action="/staff/visits/{{ v.id }}/no-show"><button class="warn small">No-show</button></form>
+{% if v.id in undo %}<form method="post" action="/staff/visits/{{ v.id }}/undo"><button class="alt small">Undo</button></form>{% endif %}
+</div></td></tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No more bookings today.</p>{% endif %}
+
+<p class="muted" style="margin-top:24px">
+Average visit today: {{ avg|round|int }} min ·
+{% if accuracy[1] is not none %}Estimates within 15 min: {{ accuracy[1]|round|int }}% this week ({{ accuracy[0] }} visits){% if accuracy[1] < 80 %} — below the 80% target{% endif %}
+{% else %}No accuracy data yet this week{% endif %}
+</p>
+{% endblock %}
