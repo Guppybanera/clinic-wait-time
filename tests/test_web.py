@@ -13,7 +13,7 @@ from app.main import create_app
 from app.models import Notification, Visit
 
 D = datetime(2026, 11, 5)
-NAMES = ["Priyanka Sharmila", "Venkatesh Raghavan", "Zubaida Fernandes"]
+NAMES = ["Anita Kumari", "Suresh Babu", "Meena Devi"]
 
 
 def at(h, m=0):
@@ -53,7 +53,7 @@ def busy_day(db):
 def no_names(text):
     for n in NAMES:
         for part in n.split():
-            assert part.lower() not in text.lower(), part
+            assert not re.search(rf"\b{part}\b", text, re.IGNORECASE), part
 
 
 # --- auth -------------------------------------------------------------------
@@ -249,3 +249,64 @@ def test_dev_outbox(staff, busy_day):
     assert r.status_code == 200 and "check_in" in r.text
     r = staff.post("/dev/sms", data={"phone": "9840000001", "body": "WAIT"})
     assert "Reply: You&#39;re 1st in line" in r.text or "Reply: You're 1st in line" in r.text
+
+
+# --- manager: full contact details and ad-hoc texts --------------------------
+
+@pytest.fixture
+def manager(db, client):
+    auth.create_user(db, username="boss", name="Boss", password="correct-horse-1", role="manager")
+    client.post("/staff/login", data={"username": "boss", "password": "correct-horse-1"})
+    return client
+
+
+def test_manager_sees_full_name_and_phone(manager, busy_day):
+    r = manager.get("/staff")
+    assert "9840000001" in r.text and NAMES[0] in r.text
+    r = manager.get("/staff/appointments")
+    assert NAMES[2] in r.text and "9840000003" in r.text
+
+
+def test_front_desk_sees_last4_only(staff, busy_day):
+    r = staff.get("/staff")
+    assert "9840000001" not in r.text and "…0001" in r.text
+    r = staff.get("/staff/appointments")
+    assert "Meena D." in r.text and NAMES[2] not in r.text
+    assert staff.get("/staff/sms").status_code == 403
+    assert staff.post("/staff/sms", data={"to": "all", "message": "hi"}).status_code == 403
+
+
+def test_adhoc_text_to_one_patient(db, manager, busy_day):
+    a = busy_day[0]
+    r = manager.get(f"/staff/sms?visit={a.id}")
+    assert r.status_code == 200 and "selected" in r.text
+    r = manager.post("/staff/sms", data={"to": str(a.id), "message": "Please bring your  old reports.",
+                                         "link": "1"})
+    assert "Text sent to 1 patient" in r.text
+    [n] = db.scalars(select(Notification).where(Notification.kind == "adhoc")).all()
+    assert n.visit_id == a.id and n.status == "sent"
+    assert n.body == f"Please bring your old reports. Live wait: http://localhost:8000/w/{a.link_token}"
+
+
+def test_adhoc_text_to_everyone_today(db, manager, busy_day):
+    r = manager.post("/staff/sms", data={"to": "all", "message": "Doctor delayed by 30 minutes."})
+    assert "Text sent to 3 patients" in r.text
+    bodies = [n.body for n in db.scalars(select(Notification).where(Notification.kind == "adhoc"))]
+    assert bodies == ["Doctor delayed by 30 minutes."] * 3     # no link box ticked
+
+
+def test_adhoc_text_refuses_names_and_empty(db, manager, busy_day):
+    a = busy_day[0]
+    r = manager.post("/staff/sms", data={"to": str(a.id), "message": "Hello Anita, please come in"})
+    assert "must not include a patient" in r.text
+    r = manager.post("/staff/sms", data={"to": "all", "message": "kumari ward is closed"})
+    assert "must not include a patient" in r.text
+    r = manager.post("/staff/sms", data={"to": str(a.id), "message": "   "})
+    assert "Type a message" in r.text
+    assert db.scalars(select(Notification).where(Notification.kind == "adhoc")).all() == []
+
+
+def test_patient_page_has_refresh(client, busy_day):
+    tok = busy_day[0].link_token
+    r = client.get(f"/w/{tok}")
+    assert f'href="/w/{tok}">Refresh</a>' in r.text

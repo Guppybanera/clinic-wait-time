@@ -43,7 +43,7 @@ and walk-ins and creates a demo manager login; its username and password are in
 Add real staff logins with:
 
 ```bash
-.venv/bin/python -m app.cli create-staff --username priya --name "Priya S" --role manager
+.venv/bin/python -m app.cli create-staff --username anita --name "Anita Kumari" --role manager
 ```
 
 ## Tests

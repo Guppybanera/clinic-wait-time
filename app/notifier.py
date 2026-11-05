@@ -10,6 +10,7 @@ Rules (see docs/SPEC.md, Notifier):
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, time, timedelta
 
 from sqlalchemy.orm import Session
@@ -18,7 +19,7 @@ from . import clock, snapshot, sms
 from .config import settings
 from .crypto import decrypt, phone_hash
 from .estimator import Estimate
-from .models import BOOKED, IN_VISIT, WAITING, ClinicConfig, Visit
+from .models import BOOKED, IN_VISIT, WAITING, AuditLog, ClinicConfig, Visit
 
 DELAY_TEXT_GAP = timedelta(minutes=15)
 
@@ -186,3 +187,50 @@ def after_change(db: Session) -> dict[int, Estimate]:
     due_pre_arrivals(db, ests)
     check_delays(db, ests)
     return ests
+
+
+# --- ad-hoc texts (managers) -------------------------------------------------
+
+ADHOC_MAX_CHARS = 300
+
+
+class AdhocError(Exception):
+    pass
+
+
+def _mentions_name(body: str, v: Visit) -> bool:
+    try:
+        name = decrypt(v.patient_name_encrypted) if v.patient_name_encrypted else ""
+    except Exception:  # noqa: BLE001
+        name = ""
+    return any(re.search(rf"\b{re.escape(part)}\b", body, re.IGNORECASE)
+               for part in name.split() if len(part) >= 3)
+
+
+def adhoc_body(v: Visit, message: str, include_link: bool) -> str:
+    body = " ".join(message.split())
+    if include_link and v.link_token:
+        body = f"{body} Live wait: {link(v)}"
+    return body
+
+
+def send_adhoc(db: Session, staff_id: int | None, visits: list[Visit], message: str,
+               include_link: bool = True) -> int:
+    """Queue a manager-written text to each visit. Refuses texts that contain the patient's name
+    (texts can be read by anyone holding the phone)."""
+    message = " ".join((message or "").split())
+    if not message:
+        raise AdhocError("Type a message")
+    if len(message) > ADHOC_MAX_CHARS:
+        raise AdhocError(f"Keep the message under {ADHOC_MAX_CHARS} characters")
+    targets = [v for v in visits if v.phone_encrypted]
+    if not targets:
+        raise AdhocError("No patient with a phone number to text")
+    for v in targets:
+        if _mentions_name(message, v):
+            raise AdhocError("Texts must not include a patient's name — remove it and send again")
+    now = clock.now()
+    for v in targets:
+        _send(db, v, "adhoc", adhoc_body(v, message, include_link))
+        db.add(AuditLog(staff_user_id=staff_id, visit_id=v.id, action="adhoc_sms", at=now))
+    return len(targets)

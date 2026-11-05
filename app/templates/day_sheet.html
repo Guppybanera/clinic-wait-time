@@ -18,7 +18,7 @@ td.box{width:70px}
 <table>
 <tr><th>Time</th><th>Name</th><th>Phone</th><th>Status</th><th>Arrived</th><th>Started</th><th>Ended</th></tr>
 {% for v in bookings %}
-<tr><td>{{ v.appointment_at|hm }}</td><td>{{ full_name(v) }}</td><td>{{ phone_end(v) }}</td><td>{{ status_label(v) }}</td>
+<tr><td>{{ v.appointment_at|hm }}</td><td>{{ full_name(v) }}</td><td>{{ phone_for(v, user) }}</td><td>{{ status_label(v) }}</td>
 <td class="box"></td><td class="box"></td><td class="box"></td></tr>
 {% endfor %}
 {% for i in range(8) %}<tr><td>&nbsp;</td><td></td><td></td><td>Walk-in</td><td class="box"></td><td class="box"></td><td class="box"></td></tr>{% endfor %}

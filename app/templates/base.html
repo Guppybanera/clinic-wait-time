@@ -20,7 +20,7 @@ h2{font-size:21px;margin:22px 0 8px}
 button,.btn{font:inherit;font-weight:600;padding:12px 18px;min-height:48px;border-radius:8px;border:2px solid #1f3a5f;background:#1f3a5f;color:#fff;cursor:pointer;text-decoration:none;display:inline-block}
 button.alt,.btn.alt{background:#fff;color:#1f3a5f}
 button.warn{background:#fff;color:#8a1c1c;border-color:#8a1c1c}
-button.small{padding:6px 12px;min-height:38px;font-size:16px}
+button.small,.btn.small{padding:6px 12px;min-height:38px;font-size:16px}
 header button{padding:4px 10px;min-height:0;font-size:15px;background:transparent;border-color:#fff}
 input,select{font:inherit;padding:10px;min-height:48px;border:2px solid #888;border-radius:8px;background:#fff}
 input[type=number]{width:6em}
@@ -45,7 +45,8 @@ th{font-size:15px;color:#444}
 <header>
 <a href="/staff" class="{{ 'on' if active == 'console' }}">Today's queue</a>
 <a href="/staff/appointments" class="{{ 'on' if active == 'appts' }}">Appointments</a>
-{% if user.role == 'manager' %}<a href="/staff/settings" class="{{ 'on' if active == 'settings' }}">Settings</a>{% endif %}
+{% if user.role == 'manager' %}<a href="/staff/sms" class="{{ 'on' if active == 'sms' }}">Send text</a>
+<a href="/staff/settings" class="{{ 'on' if active == 'settings' }}">Settings</a>{% endif %}
 {% if dev_mode %}<a href="/dev/outbox" class="{{ 'on' if active == 'outbox' }}">SMS outbox (dev)</a>{% endif %}
 <span class="who">{{ user.name }}
 <form method="post" action="/staff/logout"><button>Sign out</button></form></span>

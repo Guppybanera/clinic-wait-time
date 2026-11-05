@@ -8,10 +8,10 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import auth, clock, jobs, queue, ratelimit, snapshot, sms
+from .. import auth, clock, jobs, notifier, queue, ratelimit, snapshot, sms
 from ..db import get_db
 from ..models import (
-    BOOKED, CANCELLED, DONE, IN_VISIT, NO_SHOW, TYPE_BOOKED, WAITING, StaffUser, Visit,
+    BOOKED, CANCELLED, DONE, IN_VISIT, NO_SHOW, TYPE_BOOKED, WAITING, Notification, StaffUser, Visit,
 )
 from .common import back, flash, pop_flash, templates
 from .patient import _client_ip
@@ -201,7 +201,8 @@ def print_sheet(request: Request, date: str | None = None, db: Session = Depends
     cfg = snapshot.get_config(db)
     bookings = [v for v in queue.appointments_for(db, d) if v.state != CANCELLED]
     db.commit()
-    return templates.TemplateResponse(request, "day_sheet.html", {"d": d, "cfg": cfg, "bookings": bookings})
+    return templates.TemplateResponse(request, "day_sheet.html", {"d": d, "cfg": cfg, "bookings": bookings,
+                                                               "user": user})
 
 
 def _appt_dt(d: str, t: str) -> datetime:
@@ -302,3 +303,44 @@ def toggle_user(uid: int, request: Request, db: Session = Depends(get_db), user:
         u.active = not u.active
         db.commit()
     return back("/staff/settings")
+
+
+# --- ad-hoc texts (manager) --------------------------------------------------
+
+@router.get("/staff/sms", response_class=HTMLResponse)
+def sms_page(request: Request, visit: int | None = None, db: Session = Depends(get_db),
+             user: StaffUser = Depends(auth.manager)):
+    today = clock.now().date()
+    patients = sorted(snapshot.active_visits(db, today),
+                      key=lambda v: (v.state != IN_VISIT, v.state != WAITING, v.appointment_at or v.checked_in_at
+                                     or datetime.min))
+    selected = db.get(Visit, visit) if visit else None
+    if selected and selected not in patients:
+        patients.insert(0, selected)   # e.g. a booking on another day
+    recent = list(db.scalars(select(Notification).where(Notification.kind == "adhoc")
+                             .order_by(Notification.id.desc()).limit(20)))
+    db.commit()
+    return templates.TemplateResponse(request, "sms.html", {
+        "user": user, "patients": patients, "selected": selected, "recent": recent,
+        "max_chars": notifier.ADHOC_MAX_CHARS, "flash": pop_flash(request)})
+
+
+@router.post("/staff/sms")
+def sms_send(request: Request, to: str = Form(""), message: str = Form(""), link: str = Form(""),
+             db: Session = Depends(get_db), user: StaffUser = Depends(auth.manager)):
+    today = clock.now().date()
+    if to == "all":
+        visits = [v for v in snapshot.active_visits(db, today) if v.state in (BOOKED, WAITING)]
+    else:
+        v = db.get(Visit, int(to)) if to.isdigit() else None
+        visits = [v] if v is not None else []
+    try:
+        n = notifier.send_adhoc(db, user.id, visits, message, include_link=bool(link))
+    except notifier.AdhocError as e:
+        db.rollback()
+        flash(request, str(e), "error")
+        return back(f"/staff/sms?visit={to}" if to.isdigit() else "/staff/sms")
+    db.commit()
+    sms.flush(db)
+    flash(request, f"Text sent to {n} patient{'s' if n != 1 else ''}")
+    return back("/staff/sms")

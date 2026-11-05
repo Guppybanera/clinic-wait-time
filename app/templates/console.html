@@ -63,7 +63,7 @@ setInterval(function(){
 <tr class="{{ 'amber' if v.id in overrun }}">
   <td>{% if v.state == 'in_visit' %}—{% else %}{{ e.position if e else '' }}{% endif %}</td>
   <td><strong>{{ full_name(v) }}</strong></td>
-  <td>{{ phone_end(v) }}</td>
+  <td>{{ phone_for(v, user) }}</td>
   <td>{{ 'Booked ' ~ (v.appointment_at|hm) if v.appointment_at else 'Walk-in' }}</td>
   <td>{% if v.state == 'in_visit' %}In visit {{ ((now - v.started_at).total_seconds() // 60)|int }} min
       {% if v.id in overrun %}<br><b>Still in progress?</b>{% endif %}
@@ -77,6 +77,7 @@ setInterval(function(){
       <form method="post" action="/staff/visits/{{ v.id }}/end"><button>End visit</button></form>
     {% endif %}
     {% if v.id in undo %}<form method="post" action="/staff/visits/{{ v.id }}/undo"><button class="alt small">Undo</button></form>{% endif %}
+    {% if is_manager(user) %}<a class="btn alt small" href="/staff/sms?visit={{ v.id }}">Text</a>{% endif %}
   </div></td>
 </tr>
 {% endfor %}
@@ -87,7 +88,7 @@ setInterval(function(){
 <h2>Just finished</h2>
 <table>
 {% for v in recent %}
-<tr><td>{{ full_name(v) }}</td><td>{{ phone_end(v) }}</td><td>{{ status_label(v) }}</td>
+<tr><td>{{ full_name(v) }}</td><td>{{ phone_for(v, user) }}</td><td>{{ status_label(v) }}</td>
 <td><form method="post" action="/staff/visits/{{ v.id }}/undo"><button class="alt small">Undo</button></form></td></tr>
 {% endfor %}
 </table>
@@ -98,12 +99,13 @@ setInterval(function(){
 <table>
 {% for v in arriving %}
 {% set e = ests.get(v.id) %}
-<tr><td>{{ v.appointment_at|hm }}</td><td>{{ full_name(v) }}</td><td>{{ phone_end(v) }}</td><td>{{ status_label(v) }}</td>
+<tr><td>{{ v.appointment_at|hm }}</td><td>{{ full_name(v) }}</td><td>{{ phone_for(v, user) }}</td><td>{{ status_label(v) }}</td>
 <td>{% if e %}expected {{ e.start_low|hm }}–{{ e.start_high|hm }}{% endif %}</td>
 <td><div class="row-actions">
 <form method="post" action="/staff/visits/{{ v.id }}/check-in"><button>Check in</button></form>
 <form method="post" action="/staff/visits/{{ v.id }}/no-show"><button class="warn small">No-show</button></form>
 {% if v.id in undo %}<form method="post" action="/staff/visits/{{ v.id }}/undo"><button class="alt small">Undo</button></form>{% endif %}
+{% if is_manager(user) %}<a class="btn alt small" href="/staff/sms?visit={{ v.id }}">Text</a>{% endif %}
 </div></td></tr>
 {% endfor %}
 </table>

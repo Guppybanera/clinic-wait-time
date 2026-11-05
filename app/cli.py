@@ -20,8 +20,9 @@ from .config import settings
 from .db import SessionLocal, init_db
 from .models import Visit
 
-DEMO_NAMES = ["Asha Rao", "Bala Krishnan", "Chitra Iyer", "Deepak Menon", "Esha Nair", "Farah Khan",
-              "Gopal Reddy", "Hema Pillai", "Imran Sheikh", "Jaya Raman", "Kiran Das", "Lakshmi Bhat"]
+# Demo names: simple, generic first and last names (no caste or community surnames).
+DEMO_NAMES = ["Anita Kumari", "Ravi Kumar", "Meena Devi", "Arun Raj", "Sunita Devi", "Vijay Kumar",
+              "Rekha Rani", "Manoj Kumar", "Lata Devi", "Ajay Raj", "Kavita Rani", "Suresh Babu"]
 
 
 def create_staff(args) -> int:

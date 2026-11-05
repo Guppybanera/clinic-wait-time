@@ -19,7 +19,7 @@
   <td>
   {% for v in vs %}
     <div class="inline" style="padding:4px 0;{{ 'opacity:.55' if v.state in ('cancelled','no_show') }}">
-      <span><strong>{{ short_name(v) }}</strong> · {{ phone_end(v) }}</span>
+      <span><strong>{{ name_for(v, user) }}</strong> · {{ phone_for(v, user) }}</span>
       <span class="muted">{{ status_label(v) }}</span>
       <span class="row-actions">
       {% if v.state == 'booked' %}
@@ -30,6 +30,7 @@
       {% if v.id in undo %}
         <form method="post" action="/staff/visits/{{ v.id }}/undo"><input type="hidden" name="next" value="/staff/appointments?date={{ d.isoformat() }}"><button class="alt small" title="Undo the last action (within 2 minutes)">Undo</button></form>
       {% endif %}
+        {% if is_manager(user) and v.state in ('booked', 'waiting') %}<a class="btn alt small" href="/staff/sms?visit={{ v.id }}">Text</a>{% endif %}
       </span>
       {% if v.state == 'booked' %}
       <details><summary>Edit</summary>

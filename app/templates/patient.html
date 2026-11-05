@@ -12,6 +12,7 @@ h1{font-size:44px;line-height:1.15;margin:8px 0 4px}
 .sub{font-size:32px;font-weight:600;margin:0 0 6px}
 .est,.upd{font-size:24px;color:#333;margin:4px 0}
 .note{font-size:24px;background:#fff3cd;color:#111;border:2px solid #8a6d00;padding:10px;margin:16px 0}
+.rf{display:inline-block;font-size:24px;font-weight:600;color:#fff;background:#1f3a5f;padding:12px 28px;border-radius:8px;text-decoration:none;margin-top:8px}
 footer{margin-top:32px;font-size:24px;border-top:2px solid #ddd;padding-top:12px}
 a{color:#0645ad}
 </style>
@@ -21,7 +22,8 @@ a{color:#0645ad}
 <h1 id="h">{{ s.headline }}</h1>
 {% if s.sub %}<p class="sub" id="s">{{ s.sub }}</p>{% else %}<p class="sub" id="s" hidden></p>{% endif %}
 {% if s.kind == "waiting" %}<p class="est">Estimate</p>{% endif %}
-{% if s.kind in ("waiting", "booked") %}<p class="upd" id="u">Updated just now</p>{% endif %}
+{% if s.kind in ("waiting", "booked") %}<p class="upd" id="u">Updated just now</p>
+<p><a class="rf" id="r" href="/w/{{ token }}">Refresh</a></p>{% endif %}
 <p class="note" id="n"{% if not s.note %} hidden{% endif %}>{{ s.note }}</p>
 </main>
 {% if s.phone %}<footer>{{ s.clinic }} · <a href="tel:{{ s.phone }}">{{ s.phone }}</a></footer>{% endif %}
@@ -38,6 +40,7 @@ if(d.kind!=="waiting"&&d.kind!=="booked")return location.reload();
 set("h",d.headline);set("s",d.sub);set("n",d.note);t=Date.now();ago();};
 x.send();}
 setInterval(poll,60000);setInterval(ago,15000);
+document.getElementById("r").onclick=function(e){e.preventDefault();u.textContent="Checking…";poll();};
 })();
 </script>
 {% endif %}

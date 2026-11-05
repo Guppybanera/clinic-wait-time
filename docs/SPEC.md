@@ -37,7 +37,7 @@ The system has eight parts: three screens, a queue service at the centre, an est
 ### 2. Appointments screen (replaces the paper book)
 
 - **Where:** `/staff/appointments`, behind the same staff login. Staff use it while on the phone with a caller.
-- **Day view:** a column of time slots for the chosen date (one column per doctor if there is more than one). Free slots are blank; booked slots show the patient's name and phone ending ("Priya S. · …4821"). Arrows move to the next or previous day; bookings can be made for any future date.
+- **Day view:** a column of time slots for the chosen date (one column per doctor if there is more than one). Free slots are blank; booked slots show the patient's name and phone ending ("Ravi K. · …4821"). Arrows move to the next or previous day; bookings can be made for any future date.
 - **Book:** tap a free slot, type name and phone, save. Target: under 20 seconds, about as fast as writing in the book.
 - **Row actions:** **Check in** (one tap when the patient arrives; moves them into today's queue without retyping anything), **Edit** (time or phone), **Cancel** (no texts are sent).
 - **Statuses:** Booked → Texted → Checked in, or No-show / Cancelled.

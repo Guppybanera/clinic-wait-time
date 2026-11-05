@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, time, timedelta
 
 import pytest
@@ -24,7 +25,8 @@ def texts(db, kind=None):
 def assert_no_names(db, *names):
     for n in texts(db):
         for name in names:
-            assert name.split()[0].lower() not in n.body.lower()
+            for part in name.split():
+                assert not re.search(rf"\b{part}\b", n.body, re.IGNORECASE), part
 
 
 # --- state machine ----------------------------------------------------------
@@ -32,11 +34,11 @@ def assert_no_names(db, *names):
 def test_walk_in_lifecycle(db, phone):
     clock.set_now(at(9, 5))
     queue.open_clinic(db, None)
-    v = queue.walk_in(db, None, name="Priya Sharma", phone="+91 98400 12345")
+    v = queue.walk_in(db, None, name="Ravi Kumar", phone="+91 98400 12345")
     assert v.state == "waiting" and v.checked_in_at == at(9, 5)
     assert len(v.link_token) == 22
     assert v.first_estimate_min == 0
-    assert decrypt(v.patient_name_encrypted) == "Priya Sharma"
+    assert decrypt(v.patient_name_encrypted) == "Ravi Kumar"
     assert v.phone_last4 == "2345"
 
     clock.set_now(at(9, 20))
@@ -54,7 +56,7 @@ def test_walk_in_lifecycle(db, phone):
     assert t.status == "sent"
     assert "1st in line" in t.body and "/w/" + v.link_token in t.body
     assert phone.sent[0][0] == "+919840012345"
-    assert_no_names(db, "Priya Sharma")
+    assert_no_names(db, "Ravi Kumar")
 
 
 def test_invalid_transitions(db):
@@ -146,9 +148,9 @@ def test_undo_check_in_and_walk_in(db):
 def test_running_late_and_delay_texts(db, phone):
     clock.set_now(at(9))
     queue.open_clinic(db, None)
-    a = queue.walk_in(db, None, name="Asha Bose", phone="9840000001")
-    b = queue.walk_in(db, None, name="Chitra Das", phone="9840000002")
-    c = queue.book(db, None, name="Esha Fernandes", phone="9840000003", appointment_at=at(10))
+    a = queue.walk_in(db, None, name="Anita Kumari", phone="9840000001")
+    b = queue.walk_in(db, None, name="Suresh Babu", phone="9840000002")
+    c = queue.book(db, None, name="Meena Devi", phone="9840000003", appointment_at=at(10))
     assert texts(db, "pre_arrival")  # 60 min ahead: sent immediately
 
     # A 10-minute delay is absorbed by the gap before C's 10:00 appointment...
@@ -170,7 +172,7 @@ def test_running_late_and_delay_texts(db, phone):
     clock.set_now(at(9, 17))
     jobs.tick(db)
     assert len(texts(db, "delay")) == 6
-    assert_no_names(db, "Asha Bose", "Chitra Das", "Esha Fernandes")
+    assert_no_names(db, "Anita Kumari", "Suresh Babu", "Meena Devi")
 
 
 def test_running_late_new_opening_time(db):

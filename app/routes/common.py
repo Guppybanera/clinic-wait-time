@@ -26,7 +26,7 @@ def full_name(v: Visit) -> str:
 
 
 def short_name(v: Visit) -> str:
-    """'Priya Sharma' -> 'Priya S.' (as on the paper book)."""
+    """'Ravi Kumar' -> 'Ravi K.' (as on the paper book)."""
     parts = full_name(v).split()
     if len(parts) >= 2:
         return f"{parts[0]} {parts[-1][0]}."
@@ -37,8 +37,30 @@ def phone_end(v: Visit) -> str:
     return f"…{v.phone_last4}" if v.phone_last4 else ""
 
 
+def full_phone(v: Visit) -> str:
+    try:
+        return decrypt(v.phone_encrypted) or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def is_manager(user) -> bool:
+    return getattr(user, "role", None) == "manager"
+
+
+def name_for(v: Visit, user) -> str:
+    """Managers see the full name everywhere; front desk sees 'Ravi K.' on the book."""
+    return full_name(v) if is_manager(user) else short_name(v)
+
+
+def phone_for(v: Visit, user) -> str:
+    """Managers see the complete number; front desk sees the last 4 digits."""
+    return (full_phone(v) or phone_end(v)) if is_manager(user) else phone_end(v)
+
+
 templates.env.filters["hm"] = hm
 templates.env.globals.update(full_name=full_name, short_name=short_name, phone_end=phone_end,
+                             name_for=name_for, phone_for=phone_for, is_manager=is_manager,
                              dev_mode=settings.dev_mode)
 
 

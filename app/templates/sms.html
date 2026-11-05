@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% set active = "sms" %}
+{% block title %}Send a text{% endblock %}
+{% block body %}
+<h1>Send a text</h1>
+<form method="post" action="/staff/sms" class="card">
+  <p><label>To<br>
+  <select name="to" required style="width:100%">
+    {% if not selected %}<option value="">Choose…</option>{% endif %}
+    <option value="all">Everyone booked or waiting today</option>
+    {% for v in patients %}
+    <option value="{{ v.id }}"{% if selected and v.id == selected.id %} selected{% endif %}>
+      {{ full_name(v) }} · {{ phone_for(v, user) }} · {{ status_label(v) }}{% if v.appointment_at %} {{ v.appointment_at.strftime('%d %b %H:%M') }}{% endif %}
+    </option>
+    {% endfor %}
+  </select></label></p>
+  <p><label>Message<br>
+  <textarea name="message" rows="4" maxlength="{{ max_chars }}" required
+    style="width:100%;font:inherit;padding:10px;border:2px solid #888;border-radius:8px"
+    placeholder="e.g. The doctor has been called to an emergency. Please arrive 30 minutes later than planned."></textarea></label></p>
+  <p><label><input type="checkbox" name="link" value="1" checked style="min-height:0;width:22px;height:22px;vertical-align:middle">
+    Add the patient's live wait-time link</label></p>
+  <p class="muted">Don't include names: anyone holding the phone can read the text. Texts with the patient's name are refused.</p>
+  <p><button>Send text</button></p>
+</form>
+
+<h2>Recent texts sent from here</h2>
+<table>
+<tr><th>Sent</th><th>Status</th><th>Message</th></tr>
+{% for n in recent %}
+<tr><td>{{ n.created_at.strftime('%d %b %H:%M') }}</td><td>{{ n.status }}</td><td>{{ n.body }}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">None yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

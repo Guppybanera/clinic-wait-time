@@ -64,6 +64,8 @@ Not done yet / next candidates:
 - Keep the patient page tiny: inline CSS, no web fonts, no images, no third-party scripts.
 - Staff pages: plain forms, one tap per action, big buttons.
 - Never put a patient name or full phone number in logs, SMS bodies, or patient-facing HTML.
+- Demo, seed and test names: simple generic first + last names (e.g. Ravi Kumar, Meena Devi).
+  No caste or community surnames (Pillai, Iyer, Sharma, Reddy…).
 - Run tests with `pytest -q`. Freeze time in tests with `app.clock.set_now(...)`.
 - Placeholders still to confirm with the clinic: 90-min pre-arrival lead, slot length,
   30-day name retention, 5-min idle lock (see Open questions in the spec).
