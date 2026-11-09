@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 
 from . import clock
 from .estimator import DayInput, Estimate, VisitInput, average_visit, estimate_all, walk_in_estimate
-from .models import ACTIVE_STATES, DONE, ClinicConfig, ClinicDay, Visit
+from .models import (ACTIVE_STATES, CANCELLED, DONE, IN_VISIT, TYPE_BOOKED, WAITING, ClinicConfig,
+                     ClinicDay, Visit)
 
 
 def get_config(db: Session) -> ClinicConfig:
@@ -84,6 +85,22 @@ def estimates(db: Session, d: date | None = None) -> dict[int, Estimate]:
 def walk_in_now(db: Session) -> Estimate:
     today = clock.now().date()
     return walk_in_estimate(day_input(db, today), [to_input(v) for v in active_visits(db, today)])
+
+
+def day_totals(db: Session, d: date | None = None) -> dict:
+    """Headline numbers for the console. Averages are actual times from today's visits
+    (None until there is something to average), not the estimator's blended figure."""
+    d = d or clock.now().date()
+    visits = list(db.scalars(select(Visit).where(Visit.visit_date == d)))
+    visit_mins = completed_minutes(db, d)
+    waits = [v.actual_wait_min for v in visits if v.actual_wait_min is not None]
+    return {
+        "booked": sum(v.type == TYPE_BOOKED and v.state != CANCELLED for v in visits),
+        "in_clinic": sum(v.state in (WAITING, IN_VISIT) for v in visits),
+        "completed": sum(v.state == DONE for v in visits),
+        "avg_visit": sum(visit_mins) / len(visit_mins) if visit_mins else None,
+        "avg_wait": sum(waits) / len(waits) if waits else None,
+    }
 
 
 def today_average(db: Session) -> float:

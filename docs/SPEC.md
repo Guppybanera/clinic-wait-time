@@ -48,6 +48,7 @@ The system has eight parts: three screens, a queue service at the centre, an est
 
 - **Where:** a browser on the front-desk computer or tablet, at `/staff`. Each staff member signs in with their own login; the session lasts until closing. The screen should face away from the waiting room.
 - **Check in:** booked patients are checked in with one tap from the Appointments screen. Walk-ins use a short form: name, phone number, **Check in**. Either way the visit enters the queue and the patient gets a text. Target: under 10 seconds.
+- **Today so far:** a row of totals at the top — **Appointments booked** (today's bookings, not counting cancellations), **In clinic now** (checked in or in a visit), **Completed**, **Average visit time** (start to end, completed visits) and **Average wait time** (check-in to start, booked and walk-in). Averages use today's actual times and show "—" until there is one.
 - **Queue list:** one row per waiting patient showing name, phone ending, type (booked / walk-in), wait so far, and a single button — **Start visit** (or **End visit** once started). One tap per action.
 - **Clinic status:** a **Clinic open** button at the start of the day, and a **Running late** action ("opening at 10:30" or "doctor delayed 30 min") that shifts every estimate.
 - **Doctors in session:** a 1–2–3 selector so the estimate knows how many patients are seen in parallel.

@@ -99,6 +99,19 @@ def test_console_shows_names_to_staff(staff, busy_day):
     assert "Start visit" in r.text
 
 
+def test_console_totals(staff, busy_day):
+    # busy_day: two walk-ins waiting, one booking not yet arrived, nothing finished.
+    r = staff.get("/staff")
+    text = re.sub(r"\s+", " ", r.text)
+    for label in ["Appointments booked", "In clinic now", "Completed", "Average visit time",
+                  "Average wait time"]:
+        assert label in text
+    assert "<b>1</b><span>Appointments booked" in text
+    assert "<b>2</b><span>In clinic now" in text
+    assert "<b>0</b><span>Completed" in text
+    assert "<b>—</b><span>Average visit time" in text
+
+
 def test_walk_in_and_actions_via_forms(db, staff):
     clock.set_now(at(9))
     staff.post("/staff/clinic/open")

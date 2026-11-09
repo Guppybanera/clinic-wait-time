@@ -14,6 +14,14 @@ setInterval(function(){
 
 {% if texts_delayed %}<div class="banner">Texts delayed — the SMS provider isn't accepting messages. They'll retry for 30 minutes.</div>{% endif %}
 
+<div class="stats" aria-label="Today so far">
+  <div class="stat"><b>{{ totals.booked }}</b><span>Appointments booked</span></div>
+  <div class="stat"><b>{{ totals.in_clinic }}</b><span>In clinic now</span></div>
+  <div class="stat"><b>{{ totals.completed }}</b><span>Completed</span></div>
+  <div class="stat"><b>{% if totals.avg_visit is not none %}{{ totals.avg_visit|round|int }} min{% else %}—{% endif %}</b><span>Average visit time</span></div>
+  <div class="stat"><b>{% if totals.avg_wait is not none %}{{ totals.avg_wait|round|int }} min{% else %}—{% endif %}</b><span>Average wait time</span></div>
+</div>
+
 <div class="card">
   <div class="inline">
     {% if day.opened_at %}
@@ -112,7 +120,7 @@ setInterval(function(){
 {% else %}<p class="muted">No more bookings today.</p>{% endif %}
 
 <p class="muted" style="margin-top:24px">
-Average visit today: {{ avg|round|int }} min ·
+Estimates assume {{ avg|round|int }} min per visit ·
 {% if accuracy[1] is not none %}Estimates within 15 min: {{ accuracy[1]|round|int }}% this week ({{ accuracy[0] }} visits){% if accuracy[1] < 80 %} — below the 80% target{% endif %}
 {% else %}No accuracy data yet this week{% endif %}
 </p>

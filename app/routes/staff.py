@@ -82,7 +82,7 @@ def console(request: Request, db: Session = Depends(get_db), user: StaffUser = D
     n_acc, pct = jobs.accuracy(db)
     return templates.TemplateResponse(request, "console.html", {
         "user": user, "now": now, "day": day, "ests": ests, "in_room": in_room, "arriving": arriving,
-        "recent": recent, "avg": avg,
+        "recent": recent, "avg": avg, "totals": snapshot.day_totals(db, day.day),
         "not_open_late": day.opened_at is None and now > opening,
         "overrun": {v.id for v in in_room if v.state == IN_VISIT and v.started_at
                     and (now - v.started_at) > timedelta(minutes=2 * avg)},

@@ -55,6 +55,8 @@ Not done yet / next candidates:
 - A booked patient's clock range never starts before their appointment.
 - Booking sends a confirmation text at once (kind `booking`, even in quiet hours; "Reply WAIT"
   only for same-day bookings, since WAIT matches today's visits). Rescheduling sends no new one.
+- Console totals come from `snapshot.day_totals` (actual times today); the footer's "Estimates
+  assume N min per visit" is the estimator's blended average, which is a different number.
 - `/dev/outbox` shows each text's patient name and full phone (dev only, staff login).
 - No delay text to a patient expected within `alert_threshold_min` anyway (avoids noise
   when staff simply haven't tapped yet). Quiet hours defer pre-arrival and delay texts.
