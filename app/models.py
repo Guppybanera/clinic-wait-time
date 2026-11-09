@@ -86,7 +86,7 @@ class Notification(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id", ondelete="SET NULL"), nullable=True)
-    kind: Mapped[str] = mapped_column(String(12))  # pre_arrival / check_in / delay / reply
+    kind: Mapped[str] = mapped_column(String(12))  # booking / pre_arrival / check_in / delay / reply / adhoc
     # Encrypted destination, so the outbox can retry without keeping a plain number.
     to_encrypted: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)

@@ -7,9 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import auth, notifier, sms
-from ..crypto import decrypt, last4
+from ..crypto import decrypt
 from ..db import get_db
-from ..models import Notification, StaffUser
+from ..models import Notification, StaffUser, Visit
 from .common import back, flash, pop_flash, templates
 
 router = APIRouter()
@@ -18,7 +18,11 @@ router = APIRouter()
 @router.get("/dev/outbox", response_class=HTMLResponse)
 def outbox(request: Request, db: Session = Depends(get_db), user: StaffUser = Depends(auth.current_staff)):
     rows = list(db.scalars(select(Notification).order_by(Notification.id.desc()).limit(200)))
-    items = [{"n": n, "to": "…" + last4(decrypt(n.to_encrypted))} for n in rows]
+    items = []
+    for n in rows:
+        v = db.get(Visit, n.visit_id) if n.visit_id else None
+        name = decrypt(v.patient_name_encrypted) if v and v.patient_name_encrypted else ""
+        items.append({"n": n, "to": decrypt(n.to_encrypted), "name": name})
     return templates.TemplateResponse(request, "outbox.html", {
         "user": user, "items": items, "flash": pop_flash(request)})
 

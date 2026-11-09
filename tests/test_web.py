@@ -247,6 +247,11 @@ def test_twilio_signature():
 def test_dev_outbox(staff, busy_day):
     r = staff.get("/dev/outbox")
     assert r.status_code == 200 and "check_in" in r.text
+    assert "<th>Name</th>" in r.text
+    # Full phone number and the patient's name for each text (dev page, staff only).
+    assert re.search(r"<td>[^<]*</td><td>98\d{8}</td>", r.text)
+    assert "…" not in r.text
+    assert all(n in r.text for n in NAMES[:3]) and "booking" in r.text
     r = staff.post("/dev/sms", data={"phone": "9840000001", "body": "WAIT"})
     assert "Reply: You&#39;re 1st in line" in r.text or "Reply: You're 1st in line" in r.text
 

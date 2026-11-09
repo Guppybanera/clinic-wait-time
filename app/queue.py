@@ -104,6 +104,7 @@ def book(db: Session, staff_id: int | None, *, name: str, phone: str, appointmen
     db.add(v)
     db.flush()
     _audit(db, staff_id, "book", v, None, BOOKED)
+    notifier.on_book(db, v)  # queued before any pre-arrival text the recompute may send
     _finish(db)
     return v
 

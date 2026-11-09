@@ -54,6 +54,22 @@ def _call(cfg: ClinicConfig) -> str:
     return f" Questions: call {cfg.clinic_phone}." if cfg.clinic_phone else ""
 
 
+def day_time_str(t: datetime) -> str:
+    """'Tue 10 Nov, 10:30 am' — the booked time as a patient would write it down."""
+    return f"{t.strftime('%a')} {t.day} {t.strftime('%b')}, {clock_str(t)} {t.strftime('%p').lower()}"
+
+
+def booking_text(cfg: ClinicConfig, v: Visit) -> str:
+    when = day_time_str(v.appointment_at)
+    body = f"Your appointment at {cfg.clinic_name} is booked for {when}."
+    if v.appointment_at - clock.now() > timedelta(minutes=cfg.pre_arrival_lead_min):
+        body += (f" We'll text you about {cfg.pre_arrival_lead_min} min before with the "
+                 f"expected start time.")
+    if v.appointment_at.date() == clock.now().date():
+        body += " Reply WAIT for an update."  # WAIT replies only match today's visits
+    return body + _call(cfg)
+
+
 def pre_arrival_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
     return (f"Your visit at {cfg.clinic_name} is expected to start about {clock_range(e)}. "
             f"Reply WAIT for an update. Live: {link(v)}")
@@ -108,6 +124,13 @@ def on_check_in(db: Session, v: Visit, e: Estimate) -> None:
     cfg = snapshot.get_config(db)
     if _send(db, v, "check_in", check_in_text(cfg, v, e)):
         v.last_notified_start_at = e.expected_start
+
+
+def on_book(db: Session, v: Visit) -> None:
+    """Confirm a new booking straight away. Sent even in quiet hours: the patient has just
+    asked for the appointment (usually on the phone with staff)."""
+    cfg = snapshot.get_config(db)
+    _send(db, v, "booking", booking_text(cfg, v))
 
 
 def send_pre_arrival(db: Session, v: Visit, e: Estimate) -> bool:

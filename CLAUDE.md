@@ -53,6 +53,9 @@ Not done yet / next candidates:
 - Past opening with no "Clinic open" tap, the assumed slip is capped at 60 min
   (`MAX_ASSUMED_SLIP_MIN`); the first **Start visit** also marks the clinic open.
 - A booked patient's clock range never starts before their appointment.
+- Booking sends a confirmation text at once (kind `booking`, even in quiet hours; "Reply WAIT"
+  only for same-day bookings, since WAIT matches today's visits). Rescheduling sends no new one.
+- `/dev/outbox` shows each text's patient name and full phone (dev only, staff login).
 - No delay text to a patient expected within `alert_threshold_min` anyway (avoids noise
   when staff simply haven't tapped yet). Quiet hours defer pre-arrival and delay texts.
 - `queue.py` functions commit, then flush the outbox. Staff screens use form posts with a

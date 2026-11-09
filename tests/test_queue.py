@@ -83,13 +83,33 @@ def test_booking_and_check_in(db, phone):
     clock.set_now(at(7))  # before quiet hours end: no pre-arrival yet
     v = queue.book(db, None, name="Ravi K", phone="9840011111", appointment_at=at(10))
     assert v.state == "booked" and v.link_token and v.checked_in_at is None
-    assert texts(db) == []  # booking itself sends nothing
+    # Booking confirmation goes out at once, even in quiet hours; no pre-arrival yet.
+    [t] = texts(db)
+    assert t.kind == "booking"
+    assert "booked for Thu 5 Nov, 10:00 am" in t.body and "Ravi" not in t.body
+    assert "We'll text you about 90 min before" in t.body and "Reply WAIT" in t.body
 
     clock.set_now(at(9, 50))
     queue.open_clinic(db, None)
     queue.check_in(db, None, v.id)
     assert v.state == "waiting" and v.checked_in_at == at(9, 50)
-    assert [t.kind for t in texts(db)] == ["pre_arrival", "check_in"]
+    assert [t.kind for t in texts(db)] == ["booking", "pre_arrival", "check_in"]
+
+
+def test_booking_text_for_another_day_and_soon(db, phone):
+    clock.set_now(at(9))
+    v = queue.book(db, None, name="Meena Devi", phone="9840011111",
+                   appointment_at=at(16, 30) + timedelta(days=5))
+    [t] = texts(db, "booking")
+    assert "booked for Tue 10 Nov, 4:30 pm." in t.body and "Meena" not in t.body
+    assert "Reply WAIT" not in t.body  # WAIT only answers for today's visits
+    assert phone.sent[-1][1] == t.body
+    # Within the pre-arrival lead: no "we'll text you before" promise; the pre-arrival
+    # text follows the confirmation.
+    queue.book(db, None, name="Ravi Kumar", phone="9840022222", appointment_at=at(10))
+    kinds = [t.kind for t in texts(db) if t.visit_id != v.id]
+    assert kinds == ["booking", "pre_arrival"]
+    assert "We'll text you" not in texts(db, "booking")[-1].body
 
 
 def test_cancel_sends_nothing(db, phone):
@@ -97,7 +117,7 @@ def test_cancel_sends_nothing(db, phone):
     v = queue.book(db, None, name="Ravi K", phone="9840011111", appointment_at=at(15))
     queue.cancel(db, None, v.id)
     assert v.state == "cancelled"
-    assert texts(db) == []
+    assert [t.kind for t in texts(db)] == ["booking"]  # only the confirmation
 
 
 def test_edit_booking_resets_pre_arrival(db, phone):
@@ -221,22 +241,22 @@ def test_pre_arrival_lead_and_quiet_hours(db, phone):
     clock.set_now(at(6))
     v = queue.book(db, None, name="A B", phone="9840000001", appointment_at=at(8))
     jobs.tick(db)
-    assert texts(db) == []          # 06:30 would be due, but quiet until 07:00
+    assert texts(db, "pre_arrival") == []   # 06:30 would be due, but quiet until 07:00
     clock.set_now(at(6, 59))
     jobs.tick(db)
-    assert texts(db) == []
+    assert texts(db, "pre_arrival") == []
     clock.set_now(at(7))
     jobs.tick(db)
     [t] = texts(db, "pre_arrival")
     assert "Reply WAIT" in t.body and v.pre_arrival_sent_at == at(7)
     jobs.tick(db)
-    assert len(texts(db)) == 1      # only once
+    assert len(texts(db, "pre_arrival")) == 1   # only once
 
 
 def test_pre_arrival_not_before_lead(db):
     clock.set_now(at(8))
     queue.book(db, None, name="A B", phone="9840000001", appointment_at=at(10))
-    assert texts(db) == []
+    assert texts(db, "pre_arrival") == []
     clock.set_now(at(8, 30))
     jobs.tick(db)
     assert len(texts(db, "pre_arrival")) == 1

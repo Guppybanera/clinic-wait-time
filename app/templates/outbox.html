@@ -10,12 +10,12 @@
 <button>Send</button>
 </form>
 <table>
-<tr><th>#</th><th>Created</th><th>To</th><th>Kind</th><th>Status</th><th>Body</th></tr>
+<tr><th>#</th><th>Created</th><th>Name</th><th>To</th><th>Kind</th><th>Status</th><th>Body</th></tr>
 {% for it in items %}{% set n = it.n %}
-<tr><td>{{ n.id }}</td><td>{{ n.created_at|hm }}</td><td>{{ it.to }}</td><td>{{ n.kind }}</td>
+<tr><td>{{ n.id }}</td><td>{{ n.created_at|hm }}</td><td>{{ it.name or "—" }}</td><td>{{ it.to }}</td><td>{{ n.kind }}</td>
 <td>{{ n.status }}{% if n.attempts > 1 %} ({{ n.attempts }} tries){% endif %}</td>
 <td>{{ n.body|urlize }}</td></tr>
-{% else %}<tr><td colspan="6" class="muted">No texts yet.</td></tr>
+{% else %}<tr><td colspan="7" class="muted">No texts yet.</td></tr>
 {% endfor %}
 </table>
 {% endblock %}

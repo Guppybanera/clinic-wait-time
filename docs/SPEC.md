@@ -38,7 +38,7 @@ The system has eight parts: three screens, a queue service at the centre, an est
 
 - **Where:** `/staff/appointments`, behind the same staff login. Staff use it while on the phone with a caller.
 - **Day view:** a column of time slots for the chosen date (one column per doctor if there is more than one). Free slots are blank; booked slots show the patient's name and phone ending ("Ravi K. · …4821"). Arrows move to the next or previous day; bookings can be made for any future date.
-- **Book:** tap a free slot, type name and phone, save. Target: under 20 seconds, about as fast as writing in the book.
+- **Book:** tap a free slot, type name and phone, save. Target: under 20 seconds, about as fast as writing in the book. Saving texts the patient a booking confirmation with the date and time (see Notifier).
 - **Row actions:** **Check in** (one tap when the patient arrives; moves them into today's queue without retyping anything), **Edit** (time or phone), **Cancel** (no texts are sent).
 - **Statuses:** Booked → Texted → Checked in, or No-show / Cancelled.
 - **Print day sheet:** a one-page list of the day's bookings, printed each morning. If the internet or app is down, staff carry on with paper and enter the day's visits later.
@@ -70,6 +70,7 @@ A pure function — no database writes, no side effects — that takes today's q
 Decides who gets a text and sends it through the SMS provider.
 
 - **Every text carries the answer, not just a link.** The numbers are in the message itself, so a patient with no mobile data still gets them; the link is only for live updates.
+- **Booking confirmation:** as soon as an appointment is created, sends "Your appointment at \[Clinic\] is booked for Tue 10 Nov, 10:30 am. We'll text you about 90 min before with the expected start time." Same-day bookings also get "Reply WAIT for an update." (WAIT replies only match today's visits), plus the clinic phone if set. The "we'll text you" sentence is left out when the appointment is already within the pre-arrival lead (the pre-arrival text follows straight away). Sent even in quiet hours, because the patient has just asked for the booking. No name, no link (the live page only matters on the day).
 - **Pre-arrival (booked patients):** about 90 minutes before the appointment, sends "Your visit at \[Clinic\] is expected to start about 10:45–11:00. Reply WAIT for an update. Live: \[link\]".
 - **On check-in:** sends "You're checked in at \[Clinic\]. You're 3rd in line, about 20–35 min. Live: \[link\]". Walk-ins get their link here.
 - **On a worse estimate:** if a patient's expected start time is more than 15 minutes later than the last one they were told (by any text), sends "The clinic is running behind. Your new estimate is about 45–60 min. \[link\]". This covers late opening and doctor delays too.
@@ -78,7 +79,8 @@ Decides who gets a text and sends it through the SMS provider.
 
 ### 7. SMS gateway (outside service)
 
-- **Outbound:** pre-arrival texts, check-in texts and delay alerts.
+- **Outbound:** booking confirmations, pre-arrival texts, check-in texts, delay alerts, WAIT replies and manager-written texts.
+- **Development outbox:** with `DEV_MODE` on, texts are not sent but listed at `/dev/outbox` (staff login required) with the patient's **name** and **complete phone number** ("To"), kind, status and body, so staff can check exactly who would have been texted what. It is never available in production.
 - **Inbound:** any patient — smartphone with no data, or basic phone — texts "WAIT" to the clinic number. The provider calls `/api/sms/inbound`, and the reply is "You're 3rd in line, about 20–35 min."
 - **Walk-in check before travelling:** someone with no booking can text "WAIT" and get the current walk-in wait ("Walk-in wait now: about 40–55 min").
 
@@ -95,7 +97,7 @@ Every flow goes through the queue service. The screens never talk to the databas
 1. Staff open the Appointments screen on the requested date and tap a free slot.
 2. They type the caller's name and phone number and save. The console sends `POST /api/appointments`.
 3. The queue service creates a visit in state `booked`, with the appointment time, an encrypted name and phone, and a link token. It writes an audit entry.
-4. Nothing is texted yet; the booking simply appears in the slot.
+4. The notifier texts a booking confirmation with the appointment date and time (no name), and the booking appears in the slot.
 
 **Flow B — Pre-arrival text (the "should I leave yet?" moment)**
 
@@ -189,7 +191,7 @@ Six tables. Name and phone are the only personal details; both are encrypted, sh
 | `visits` | `id`, `patient_name_encrypted`, `phone_encrypted`, `appointment_at` (empty for walk-ins), `doctor`, `type` (booked / walk-in), `state` (booked / waiting / in\_visit / done / no\_show / cancelled), `link_token` (random, 128-bit), `pre_arrival_sent_at`, `checked_in_at`, `started_at`, `ended_at`, `first_estimate_min`, `actual_wait_min`, `last_notified_start_at`, `last_delay_text_at`, `phone_hash` (keyed hash of the last 10 digits, for matching WAIT texts), `phone_last4` | One row per appointment or walk-in; drives the Appointments screen, the queue and the patient page | Link token cleared at midnight on the visit day; name and phone deleted after 30 days; timing fields kept 90 days for accuracy reporting |
 | `clinic_days` | `date`, `opening_time`, `closing_time`, `opened_at`, `delay_until`, `doctors_expected`, `doctors_in_session`, `last_staff_action_at` | Each day's opening, late-start and staffing, used by the estimator | 90 days |
 | `clinic_config` | `default_visit_min`, `slot_length_min`, `default_opening_time`, `pre_arrival_lead_min` (90), `alert_threshold_min` (15), `quiet_hours`, `clinic_sms_number`, `clinic_phone` | Settings the manager can change without code | Permanent |
-| `notifications` | `id`, `visit_id`, `kind` (pre-arrival / check-in / delay / reply), `status` (queued / sent / failed), `attempts`, `sent_at` | Outbox for the notifier; lets failed texts retry | 30 days |
+| `notifications` | `id`, `visit_id`, `kind` (booking / pre-arrival / check-in / delay / reply / adhoc), `status` (queued / sent / failed), `attempts`, `sent_at` | Outbox for the notifier; lets failed texts retry | 30 days |
 | `audit_log` | `id`, `staff_user`, `visit_id`, `action`, `from_state`, `to_state`, `undone`, `at` | Who booked, viewed or changed what, for Undo and privacy reviews | 1 year |
 | `staff_users` | `id`, `name`, `password_hash`, `role` (front desk / manager), `active` | Individual logins, so every action is traceable to a person | While employed |
 
@@ -233,6 +235,7 @@ Every measurable line in the product requirement maps to a part of this design a
 
 | Requirement | Delivered by | How to check |
 | --- | --- | --- |
+| Patient has a written record of their booking | Booking confirmation text (Flow A) | Book a slot; confirm the text arrives within a minute with the right date and time and no name |
 | Tells a patient whether to leave for the clinic yet | Pre-arrival text \~90 min before the appointment, plus delay alerts (Flows B, G) | Book a test slot; confirm the text arrives 90 min ahead with an expected start range |
 | Walk-ins can check before travelling | Inbound WAIT returns the current walk-in wait (Flow F) | Text WAIT from a number with no booking |
 | Nothing to install; no login for patients | Patient status page via SMS link | Open the link on a phone that has never visited the site |
