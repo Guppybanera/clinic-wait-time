@@ -69,8 +69,19 @@ def set_backend(b) -> None:
     _backend_override = b
 
 
+# Characters outside the GSM 7-bit alphabet force the whole text into UCS-2, which fits 70
+# characters per segment instead of 160 (153 when split), so a 300-character text bills as
+# 5 messages instead of 2. Swap the common typographic ones for plain equivalents.
+GSM_SWAPS = str.maketrans({"–": "-", "—": "-", "‘": "'", "’": "'", "“": '"', "”": '"',
+                           "…": "...", "\u00a0": " "})
+
+
+def gsm_text(body: str) -> str:
+    return body.translate(GSM_SWAPS)
+
+
 def enqueue(db: Session, *, to: str, body: str, kind: str, visit_id: int | None) -> Notification:
-    n = Notification(visit_id=visit_id, kind=kind, to_encrypted=encrypt(to), body=body,
+    n = Notification(visit_id=visit_id, kind=kind, to_encrypted=encrypt(to), body=gsm_text(body),
                      status=QUEUED, attempts=0, created_at=clock.now())
     db.add(n)
     db.flush()

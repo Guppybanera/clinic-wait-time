@@ -78,12 +78,13 @@ Decides who gets a text and sends it through the SMS provider.
   [Clinic] is running behind. New estimate:
   Scheduled visit time: 7:15 pm
   Estimated delay: 30 min
-  Estimated time: 7:40–7:55 pm
+  Estimated time: 7:40-7:55 pm
   Reply WAIT for an update. Live: [link]
   Times are estimates based on average wait and visit times; actual time may vary.
   ```
 
   *Estimated delay* is the expected start minus the appointment, to the nearest 5 minutes; when there is none it reads "None, on time". Walk-ins have no scheduled time, so they get "Scheduled visit time: Walk-in (checked in 5:12 pm)" and "Estimated wait: about 20–35 min" in place of the delay line.
+- **Plain characters only:** texts use the basic SMS alphabet. Typographic dashes, curly quotes and "…" (including any a manager types) are swapped for plain ones before sending, because a single such character makes the provider send the whole text in Unicode, at 70 characters per message instead of 160: the delay text above bills as 2 messages instead of 5.
 - **Pre-arrival (booked patients):** about 90 minutes before the appointment, opening "Your visit at \[Clinic\]:".
 - **On check-in:** opening "You're checked in at \[Clinic\]. You're 3rd in line.". Walk-ins get their link here.
 - **On a worse estimate:** if a patient's expected start time is more than 15 minutes later than the last one they were told (by any text), sends the delay text above. This covers late opening and doctor delays too.

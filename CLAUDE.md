@@ -58,6 +58,8 @@ Not done yet / next candidates:
 - Estimate texts (pre-arrival, check-in, delay, WAIT reply) share `notifier.estimate_lines`:
   scheduled time / estimated delay (or wait, for walk-ins) / estimated time, then
   `ESTIMATE_NOTE`. Bodies contain newlines; the outbox shows them with `pre-line`.
+- `sms.enqueue` swaps dashes/curly quotes/"…" for GSM characters (`sms.gsm_text`), so a
+  ~300-char text bills as 2 segments, not 5. The patient page keeps its en dashes.
 - Console totals come from `snapshot.day_totals` (actual times today); the footer's "Estimates
   assume N min per visit" is the estimator's blended average, which is a different number.
 - `/dev/outbox` shows each text's patient name and full phone (dev only, staff login).

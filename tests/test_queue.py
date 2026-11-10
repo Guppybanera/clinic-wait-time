@@ -184,7 +184,7 @@ def test_running_late_and_delay_texts(db, phone):
     assert all("running behind" in t.body for t in delays)
     body_c = next(t.body for t in delays if t.visit_id == c.id)
     # C booked 10:00; the clinic now starts at 10:01 behind two walk-ins.
-    assert "Scheduled visit time: 10:00 am\nEstimated delay: 30 min\nEstimated time: 10:25–10:40 am" in body_c
+    assert "Scheduled visit time: 10:00 am\nEstimated delay: 30 min\nEstimated time: 10:25-10:40 am" in body_c
     assert body_c.endswith(notifier.ESTIMATE_NOTE)
     body_a = next(t.body for t in delays if t.visit_id == a.id)
     assert "Scheduled visit time: Walk-in (checked in 9:00 am)\nEstimated wait: about" in body_a
@@ -254,7 +254,7 @@ def test_pre_arrival_lead_and_quiet_hours(db, phone):
     [t] = texts(db, "pre_arrival")
     assert "Reply WAIT" in t.body and v.pre_arrival_sent_at == at(7)
     # Booked for 8:00 but the clinic opens at 9:00, so the text says so.
-    assert "Scheduled visit time: 8:00 am\nEstimated delay: 60 min\nEstimated time: 8:55–9:10 am" in t.body
+    assert "Scheduled visit time: 8:00 am\nEstimated delay: 60 min\nEstimated time: 8:55-9:10 am" in t.body
     jobs.tick(db)
     assert len(texts(db, "pre_arrival")) == 1   # only once
 
@@ -287,7 +287,7 @@ def test_inbound_booked_and_in_visit(db):
     v = queue.book(db, None, name="A B", phone="9840000001", appointment_at=at(11))
     reply = notifier.handle_inbound(db, "9840000001", "WAIT")
     assert "Scheduled visit time: 11:00 am\nEstimated delay: None, on time\n" in reply
-    assert "Estimated time: 11:00–11:15 am" in reply and notifier.ESTIMATE_NOTE in reply
+    assert "Estimated time: 11:00-11:15 am" in reply and notifier.ESTIMATE_NOTE in reply
     clock.set_now(at(10, 55))
     queue.open_clinic(db, None)
     queue.check_in(db, None, v.id)
@@ -379,3 +379,21 @@ def test_day_totals(db):
     t = snapshot.day_totals(db)
     assert t["in_clinic"] == 0 and t["completed"] == 2 and t["avg_visit"] == 15
     assert c.state == "booked"
+
+
+def test_texts_use_gsm_characters_only(db, phone):
+    """Dashes and curly quotes would force UCS-2 and more than double the SMS cost."""
+    clock.set_now(at(9))
+    queue.open_clinic(db, None)
+    v = queue.walk_in(db, None, name="Ravi Kumar", phone="9840000001")
+    queue.book(db, None, name="Meena Devi", phone="9840000002", appointment_at=at(9, 30))
+    queue.start(db, None, v.id)
+    notifier.handle_inbound(db, "9840000001", "WAIT")            # "It's your turn — ..."
+    notifier.send_adhoc(db, None, [v], "Doctor’s room “2” – first floor…")
+    db.commit()
+    bodies = [t.body for t in texts(db)]
+    assert len(bodies) >= 4
+    for b in bodies:
+        assert not set(b) & set("–—‘’“”…"), b
+    assert any("Doctor's room \"2\" - first floor..." in b for b in bodies)
+    assert all(sent[1] in bodies for sent in phone.sent)

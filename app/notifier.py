@@ -237,8 +237,8 @@ def handle_inbound(db: Session, from_number: str, body: str) -> str:
         reply = status_reply(cfg, v, e)
         if e is not None:
             v.last_notified_start_at = e.expected_start
-    sms.enqueue(db, to=from_number, body=reply, kind="reply", visit_id=v.id if v else None)
-    return reply
+    n = sms.enqueue(db, to=from_number, body=reply, kind="reply", visit_id=v.id if v else None)
+    return n.body
 
 
 def after_change(db: Session) -> dict[int, Estimate]:
