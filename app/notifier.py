@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from . import clock, snapshot, sms
 from .config import settings
 from .crypto import decrypt, phone_hash
-from .estimator import Estimate
+from .estimator import Estimate, round5
 from .models import BOOKED, IN_VISIT, WAITING, AuditLog, ClinicConfig, Visit
 
 DELAY_TEXT_GAP = timedelta(minutes=15)
@@ -70,22 +70,58 @@ def booking_text(cfg: ClinicConfig, v: Visit) -> str:
     return body + _call(cfg)
 
 
+ESTIMATE_NOTE = ("Times are estimates based on average wait and visit times; "
+                 "actual time may vary.")
+
+
+def ampm(t: datetime) -> str:
+    return f"{clock_str(t)} {t.strftime('%p').lower()}"
+
+
+def delay_minutes(v: Visit, e: Estimate) -> int:
+    """How far the expected start is behind the appointment, to the nearest 5 min (0 = on time)."""
+    if not v.appointment_at:
+        return 0
+    return max(0, round5((e.expected_start - v.appointment_at).total_seconds() / 60))
+
+
+def estimate_lines(v: Visit, e: Estimate) -> str:
+    """The three lines every estimate text carries."""
+    if v.appointment_at:
+        d = delay_minutes(v, e)
+        second = f"Estimated delay: {d} min" if d else "Estimated delay: None, on time"
+        scheduled = ampm(v.appointment_at)
+    else:
+        # A walk-in has no scheduled time to be late against: give the wait instead.
+        second = f"Estimated wait: {wait_str(e)}"
+        scheduled = f"Walk-in (checked in {ampm(v.checked_in_at)})" if v.checked_in_at else "Walk-in"
+    return (f"Scheduled visit time: {scheduled}\n"
+            f"{second}\n"
+            f"Estimated time: {clock_range(e)}")
+
+
+def _estimate_text(cfg: ClinicConfig, v: Visit, e: Estimate, opening: str, wait: bool = True) -> str:
+    parts = [opening, estimate_lines(v, e)]
+    tail = "Reply WAIT for an update." if wait else ""
+    if link(v):
+        tail = f"{tail} Live: {link(v)}".strip()
+    if tail:
+        parts.append(tail)
+    parts.append(ESTIMATE_NOTE)
+    return "\n".join(parts)
+
+
 def pre_arrival_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
-    return (f"Your visit at {cfg.clinic_name} is expected to start about {clock_range(e)}. "
-            f"Reply WAIT for an update. Live: {link(v)}")
+    return _estimate_text(cfg, v, e, f"Your visit at {cfg.clinic_name}:")
 
 
 def check_in_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
-    return (f"You're checked in at {cfg.clinic_name}. You're {ordinal(e.position or 1)} in line, "
-            f"{wait_str(e)}. Live: {link(v)}")
+    return _estimate_text(cfg, v, e, f"You're checked in at {cfg.clinic_name}. "
+                                     f"You're {ordinal(e.position or 1)} in line.")
 
 
 def delay_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
-    if v.state == BOOKED:
-        new = f"Your visit is now expected to start about {clock_range(e)}."
-    else:
-        new = f"Your new estimate is {wait_str(e)}."
-    return f"{cfg.clinic_name} is running behind. {new} {link(v)}".rstrip()
+    return _estimate_text(cfg, v, e, f"{cfg.clinic_name} is running behind. New estimate:")
 
 
 def status_reply(cfg: ClinicConfig, v: Visit | None, e: Estimate | None) -> str:
@@ -94,8 +130,9 @@ def status_reply(cfg: ClinicConfig, v: Visit | None, e: Estimate | None) -> str:
     if v.state == IN_VISIT:
         return "It's your turn — please come to the front desk."
     if v.state == BOOKED:
-        return f"Your visit is expected to start about {clock_range(e)}. Live: {link(v)}"
-    return f"You're {ordinal(e.position or 1)} in line, {wait_str(e)}. Live: {link(v)}"
+        return _estimate_text(cfg, v, e, f"Your visit at {cfg.clinic_name}:", wait=False)
+    return _estimate_text(cfg, v, e, f"You're {ordinal(e.position or 1)} in line at {cfg.clinic_name}.",
+                          wait=False)
 
 
 # --- rules -----------------------------------------------------------------

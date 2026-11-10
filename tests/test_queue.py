@@ -183,7 +183,11 @@ def test_running_late_and_delay_texts(db, phone):
     assert {t.visit_id for t in delays} == {a.id, b.id, c.id}
     assert all("running behind" in t.body for t in delays)
     body_c = next(t.body for t in delays if t.visit_id == c.id)
-    assert "expected to start about" in body_c
+    # C booked 10:00; the clinic now starts at 10:01 behind two walk-ins.
+    assert "Scheduled visit time: 10:00 am\nEstimated delay: 30 min\nEstimated time: 10:25–10:40 am" in body_c
+    assert body_c.endswith(notifier.ESTIMATE_NOTE)
+    body_a = next(t.body for t in delays if t.visit_id == a.id)
+    assert "Scheduled visit time: Walk-in (checked in 9:00 am)\nEstimated wait: about" in body_a
 
     # A further small delay doesn't text again; a big one within 15 min is held back.
     clock.set_now(at(9, 5))
@@ -249,6 +253,8 @@ def test_pre_arrival_lead_and_quiet_hours(db, phone):
     jobs.tick(db)
     [t] = texts(db, "pre_arrival")
     assert "Reply WAIT" in t.body and v.pre_arrival_sent_at == at(7)
+    # Booked for 8:00 but the clinic opens at 9:00, so the text says so.
+    assert "Scheduled visit time: 8:00 am\nEstimated delay: 60 min\nEstimated time: 8:55–9:10 am" in t.body
     jobs.tick(db)
     assert len(texts(db, "pre_arrival")) == 1   # only once
 
@@ -280,7 +286,8 @@ def test_inbound_booked_and_in_visit(db):
     clock.set_now(at(8))
     v = queue.book(db, None, name="A B", phone="9840000001", appointment_at=at(11))
     reply = notifier.handle_inbound(db, "9840000001", "WAIT")
-    assert "expected to start about 11:00" in reply
+    assert "Scheduled visit time: 11:00 am\nEstimated delay: None, on time\n" in reply
+    assert "Estimated time: 11:00–11:15 am" in reply and notifier.ESTIMATE_NOTE in reply
     clock.set_now(at(10, 55))
     queue.open_clinic(db, None)
     queue.check_in(db, None, v.id)

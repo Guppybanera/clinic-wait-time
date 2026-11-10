@@ -72,9 +72,21 @@ Decides who gets a text and sends it through the SMS provider.
 
 - **Every text carries the answer, not just a link.** The numbers are in the message itself, so a patient with no mobile data still gets them; the link is only for live updates.
 - **Booking confirmation:** as soon as an appointment is created, sends "Your appointment at \[Clinic\] is booked for Tue 10 Nov, 10:30 am. We'll text you about 90 min before with the expected start time." Same-day bookings also get "Reply WAIT for an update." (WAIT replies only match today's visits), plus the clinic phone if set. The "we'll text you" sentence is left out when the appointment is already within the pre-arrival lead (the pre-arrival text follows straight away). Sent even in quiet hours, because the patient has just asked for the booking. No name, no link (the live page only matters on the day).
-- **Pre-arrival (booked patients):** about 90 minutes before the appointment, sends "Your visit at \[Clinic\] is expected to start about 10:45–11:00. Reply WAIT for an update. Live: \[link\]".
-- **On check-in:** sends "You're checked in at \[Clinic\]. You're 3rd in line, about 20–35 min. Live: \[link\]". Walk-ins get their link here.
-- **On a worse estimate:** if a patient's expected start time is more than 15 minutes later than the last one they were told (by any text), sends "The clinic is running behind. Your new estimate is about 45–60 min. \[link\]". This covers late opening and doctor delays too.
+- **Text layout:** every text that carries an estimate (pre-arrival, check-in, delay, WAIT reply) has the same three lines, then the link and a note:
+
+  ```
+  [Clinic] is running behind. New estimate:
+  Scheduled visit time: 7:15 pm
+  Estimated delay: 30 min
+  Estimated time: 7:40–7:55 pm
+  Reply WAIT for an update. Live: [link]
+  Times are estimates based on average wait and visit times; actual time may vary.
+  ```
+
+  *Estimated delay* is the expected start minus the appointment, to the nearest 5 minutes; when there is none it reads "None, on time". Walk-ins have no scheduled time, so they get "Scheduled visit time: Walk-in (checked in 5:12 pm)" and "Estimated wait: about 20–35 min" in place of the delay line.
+- **Pre-arrival (booked patients):** about 90 minutes before the appointment, opening "Your visit at \[Clinic\]:".
+- **On check-in:** opening "You're checked in at \[Clinic\]. You're 3rd in line.". Walk-ins get their link here.
+- **On a worse estimate:** if a patient's expected start time is more than 15 minutes later than the last one they were told (by any text), sends the delay text above. This covers late opening and doctor delays too.
 - **Limits:** at most one delay text per patient every 15 minutes, none during quiet hours (8 pm–7 am by default; pre-arrival texts due then are deferred to 7 am), and none to a patient expected to be seen within the next 15 minutes anyway, so a busy afternoon doesn't produce a flood of texts.
 - **Delivery:** a background job runs every minute, sends pre-arrival texts that are due, and retries any queued or failed sends.
 
@@ -82,7 +94,7 @@ Decides who gets a text and sends it through the SMS provider.
 
 - **Outbound:** booking confirmations, pre-arrival texts, check-in texts, delay alerts, WAIT replies and manager-written texts.
 - **Development outbox:** with `DEV_MODE` on, texts are not sent but listed at `/dev/outbox` (staff login required) with the patient's **name** and **complete phone number** ("To"), kind, status and body, so staff can check exactly who would have been texted what. It is never available in production.
-- **Inbound:** any patient — smartphone with no data, or basic phone — texts "WAIT" to the clinic number. The provider calls `/api/sms/inbound`, and the reply is "You're 3rd in line, about 20–35 min."
+- **Inbound:** any patient — smartphone with no data, or basic phone — texts "WAIT" to the clinic number. The provider calls `/api/sms/inbound`, and the reply uses the same three-line layout (scheduled time, estimated delay or wait, estimated time) and the note.
 - **Walk-in check before travelling:** someone with no booking can text "WAIT" and get the current walk-in wait ("Walk-in wait now: about 40–55 min").
 
 ### 8. Database
