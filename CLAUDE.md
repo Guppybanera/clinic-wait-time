@@ -38,8 +38,8 @@ Not done yet / next candidates:
 ## Implementation notes (differences from the spec's wording)
 
 - **Estimator is a small simulation**, not the bare formula: D doctors become free at given
-  times; patients are taken in queue order (booked by appointment time, walk-ins by check-in
-  time, so walk-ins fill gaps). It reduces to the spec's formula when everyone is present,
+  times; patients are taken in queue order (booked by appointment time, walk-ins by the time a
+  manager added them, so walk-ins fill gaps). It reduces to the spec's formula when everyone is present,
   and also handles gaps and booked patients who haven't arrived. Booked patients > 30 min past
   their appointment and not arrived go to the back. Update `docs/SPEC.md` to say this.
 - **`clinic_days.delay_until`** (a datetime) replaces the spec's `delay_min`; "Running late"
@@ -49,6 +49,13 @@ Not done yet / next candidates:
 - **No visit code.** Inbound texts are matched by the sender's phone (keyed hash), so the short
   code from earlier drafts isn't needed.
 - **One queue for the whole clinic** (per-doctor queues are an open question in the spec).
+- **Walk-in list:** walk-ins check in onto a separate list (`visits.queued_at` NULL). Their
+  initial estimate counts only patients checked in (`estimator.estimate_all` simulates them as a
+  tail after waiting/in-visit patients). A manager's **Add to queue** (`queue.move_to_queue`,
+  `POST /staff/visits/{id}/queue`) sets `queued_at`; they then sort by `queued_at` among
+  bookings, get a `queued` text with the revised estimate, and only then can start. Undo
+  clears `queued_at`. `first_estimate_min` is re-recorded at the move (waited + revised).
+- `db.init_db` adds missing nullable columns to existing tables (tiny forward-only migration).
 - All datetimes are clinic-local and naive (single clinic). `CLINIC_TZ` defaults to Asia/Kolkata.
 - Past opening with no "Clinic open" tap, the assumed slip is capped at 60 min
   (`MAX_ASSUMED_SLIP_MIN`); the first **Start visit** also marks the clinic open.

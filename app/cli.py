@@ -74,9 +74,11 @@ def seed_demo(args) -> int:
         for i in range(3):
             queue.book(db, None, name=names.pop(), phone=f"98400{rnd.randint(10000, 99999)}",
                        appointment_at=tomorrow + i * slot)
-        for _ in range(3):
-            queue.walk_in(db, None, name=names.pop(), phone=f"98400{rnd.randint(10000, 99999)}")
-        print("Seeded today with 6 bookings and 3 walk-ins, and 3 bookings tomorrow.")
+        walk_ins = [queue.walk_in(db, None, name=names.pop(), phone=f"98400{rnd.randint(10000, 99999)}")
+                    for _ in range(3)]
+        queue.move_to_queue(db, None, walk_ins[0].id)  # one already in the queue, two on the list
+        print("Seeded today with 6 bookings and 3 walk-ins (1 in the queue, 2 on the walk-in list), "
+              "and 3 bookings tomorrow.")
     return 0
 
 

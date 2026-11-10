@@ -30,4 +30,23 @@ def get_db():
 def init_db(bind=None) -> None:
     from . import models  # noqa: F401  (register tables)
 
-    Base.metadata.create_all(bind=bind or engine)
+    eng = bind or engine
+    Base.metadata.create_all(bind=eng)
+    _add_missing_columns(eng)
+
+
+def _add_missing_columns(eng) -> None:
+    """Tiny forward-only migration: add nullable columns that newer code expects to tables
+    created by older code (create_all never alters an existing table)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(eng)
+    with eng.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have and col.nullable:
+                    ddl = col.type.compile(dialect=eng.dialect)
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}'))

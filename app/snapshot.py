@@ -70,7 +70,7 @@ def day_input(db: Session, d: date | None = None) -> DayInput:
 def to_input(v: Visit) -> VisitInput:
     return VisitInput(id=v.id, state=v.state, is_booked=v.appointment_at is not None,
                       appointment_at=v.appointment_at, checked_in_at=v.checked_in_at,
-                      started_at=v.started_at)
+                      started_at=v.started_at, queued_at=v.queued_at)
 
 
 def estimates(db: Session, d: date | None = None) -> dict[int, Estimate]:
@@ -87,6 +87,10 @@ def walk_in_now(db: Session) -> Estimate:
     return walk_in_estimate(day_input(db, today), [to_input(v) for v in active_visits(db, today)])
 
 
+def on_walk_in_list(v: Visit) -> bool:
+    return v.state == WAITING and v.type != TYPE_BOOKED and v.queued_at is None
+
+
 def day_totals(db: Session, d: date | None = None) -> dict:
     """Headline numbers for the console. Averages are actual times from today's visits
     (None until there is something to average), not the estimator's blended figure."""
@@ -97,6 +101,7 @@ def day_totals(db: Session, d: date | None = None) -> dict:
     return {
         "booked": sum(v.type == TYPE_BOOKED and v.state != CANCELLED for v in visits),
         "in_clinic": sum(v.state in (WAITING, IN_VISIT) for v in visits),
+        "walk_in_list": sum(on_walk_in_list(v) for v in visits),
         "completed": sum(v.state == DONE for v in visits),
         "avg_visit": sum(visit_mins) / len(visit_mins) if visit_mins else None,
         "avg_wait": sum(waits) / len(waits) if waits else None,

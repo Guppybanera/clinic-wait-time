@@ -19,6 +19,13 @@ NAMES = ["Anita Kumari", "Suresh Babu", "Meena Devi"]
 def at(h, m=0):
     return D.replace(hour=h, minute=m)
 
+def walk_in_q(db, staff_id=None, **kw):
+    """Walk-in checked in and moved straight into the queue (what most queue tests need)."""
+    v = queue.walk_in(db, staff_id, **kw)
+    queue.move_to_queue(db, staff_id, v.id)
+    return v
+
+
 
 @pytest.fixture
 def client(db):
@@ -44,8 +51,8 @@ def staff(db, client):
 def busy_day(db):
     clock.set_now(at(9))
     queue.open_clinic(db, None)
-    a = queue.walk_in(db, None, name=NAMES[0], phone="9840000001")
-    b = queue.walk_in(db, None, name=NAMES[1], phone="9840000002")
+    a = walk_in_q(db, None, name=NAMES[0], phone="9840000001")
+    b = walk_in_q(db, None, name=NAMES[1], phone="9840000002")
     c = queue.book(db, None, name=NAMES[2], phone="9840000003", appointment_at=at(10))
     return a, b, c
 
@@ -118,7 +125,13 @@ def test_walk_in_and_actions_via_forms(db, staff):
     r = staff.post("/staff/walk-in", data={"name": "Test Patient", "phone": "98400 11111"})
     assert r.status_code == 200
     v = db.scalar(select(Visit))
-    assert v.state == "waiting"
+    assert v.state == "waiting" and v.queued_at is None
+    r = staff.get("/staff")
+    assert "Walk-in list (1)" in r.text and "Add to queue" not in r.text   # front desk
+    r = staff.post(f"/staff/visits/{v.id}/start")
+    assert v.state == "waiting" and "manager must add them" in r.text
+    assert staff.post(f"/staff/visits/{v.id}/queue").status_code == 403
+    queue.move_to_queue(db, None, v.id)
     staff.post(f"/staff/visits/{v.id}/start")
     assert v.state == "in_visit"
     staff.post(f"/staff/visits/{v.id}/undo")
@@ -276,6 +289,20 @@ def manager(db, client):
     auth.create_user(db, username="boss", name="Boss", password="correct-horse-1", role="manager")
     client.post("/staff/login", data={"username": "boss", "password": "correct-horse-1"})
     return client
+
+
+def test_manager_moves_walk_in_into_queue(db, manager):
+    clock.set_now(at(9))
+    manager.post("/staff/clinic/open")
+    manager.post("/staff/walk-in", data={"name": "Kavita Rani", "phone": "9840011111"})
+    v = db.scalar(select(Visit))
+    r = manager.get("/staff")
+    assert "Walk-in list (1)" in r.text and "Add to queue" in r.text
+    assert "In the queue (0)" in r.text
+    r = manager.post(f"/staff/visits/{v.id}/queue")
+    assert v.queued_at == at(9)
+    assert "In the queue (1)" in r.text and "Walk-in list (0)" in r.text
+    assert "Walk-in, added 09:00" in r.text
 
 
 def test_manager_sees_full_name_and_phone(manager, busy_day):

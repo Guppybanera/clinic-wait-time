@@ -31,9 +31,11 @@ def day(now, *, opened=True, opening=at(9), delay_until=None, doctors=1, expecte
     )
 
 
-def walk_in(id, checked_in):
+def walk_in(id, checked_in, queued=True):
+    """A walk-in already moved into the queue (at check-in time) unless queued=False."""
     return VisitInput(id=id, state="waiting", is_booked=False, appointment_at=None,
-                      checked_in_at=checked_in, started_at=None)
+                      checked_in_at=checked_in, started_at=None,
+                      queued_at=checked_in if queued else None)
 
 
 def booked(id, appt, checked_in=None):
@@ -230,7 +232,48 @@ def test_empty_queue_and_walk_in_estimate():
     visits = [walk_in(1, at(9, 50)), walk_in(2, at(9, 55))]
     probe = walk_in_estimate(day(now), visits)
     assert probe.wait_min == pytest.approx(30)
-    assert probe.position == 3
+    assert probe.position is None and probe.walk_in_place == 1   # joins the walk-in list
+
+
+# --- walk-in list (not yet moved into the queue) -----------------------------
+
+def test_walk_in_list_waits_behind_everyone_checked_in():
+    now = at(10)
+    visits = [
+        in_visit(1, at(9, 55)),                        # free at 10:10
+        booked(2, at(10, 0), checked_in=at(9, 50)),    # 10:10
+        booked(3, at(10, 15)),                         # not arrived: ignored for walk-ins
+        walk_in(4, at(9, 40), queued=False),           # checked in before #2, but on the list
+        walk_in(5, at(9, 58), queued=False),
+    ]
+    est = estimate_all(day(now), visits)
+    assert est[2].expected_start == at(10, 10) and est[2].position == 1
+    assert est[3].expected_start == at(10, 25)          # walk-ins don't push the queue back
+    assert est[4].expected_start == at(10, 25) and est[4].walk_in_place == 1
+    assert est[5].expected_start == at(10, 40) and est[5].walk_in_place == 2
+    assert est[4].position is None
+
+
+def test_moving_a_walk_in_into_the_queue_revises_their_time():
+    now = at(10)
+    base = [in_visit(1, at(9, 55)), booked(2, at(10, 30)), booked(3, at(10, 45))]
+    held = estimate_all(day(now), base + [walk_in(4, at(9, 40), queued=False)])
+    assert held[4].expected_start == at(10, 10)         # only #1 is checked in
+    # Moved in at 10:00: fills the gap before the 10:30 booking.
+    moved = estimate_all(day(now), base + [
+        VisitInput(id=4, state="waiting", is_booked=False, appointment_at=None,
+                   checked_in_at=at(9, 40), started_at=None, queued_at=at(10))])
+    assert moved[4].expected_start == at(10, 10) and moved[4].position == 1
+    assert moved[4].walk_in_place is None
+    assert moved[2].expected_start == at(10, 30)
+    # A second walk-in moved in at 10:20 goes after the 10:00 one; the 10:30 booking moves.
+    moved2 = estimate_all(day(now), base + [
+        VisitInput(id=4, state="waiting", is_booked=False, appointment_at=None,
+                   checked_in_at=at(9, 40), started_at=None, queued_at=at(10)),
+        VisitInput(id=5, state="waiting", is_booked=False, appointment_at=None,
+                   checked_in_at=at(9, 45), started_at=None, queued_at=at(10, 20))])
+    assert moved2[5].expected_start == at(10, 25)
+    assert moved2[2].expected_start == at(10, 40)
 
 
 def test_done_and_cancelled_ignored():

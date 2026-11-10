@@ -14,6 +14,13 @@ D = datetime(2026, 11, 5)
 def at(h, m=0):
     return D.replace(hour=h, minute=m)
 
+def walk_in_q(db, staff_id=None, **kw):
+    """Walk-in checked in and moved straight into the queue (what most queue tests need)."""
+    v = queue.walk_in(db, staff_id, **kw)
+    queue.move_to_queue(db, staff_id, v.id)
+    return v
+
+
 
 def texts(db, kind=None):
     q = select(Notification).order_by(Notification.id)
@@ -35,11 +42,26 @@ def test_walk_in_lifecycle(db, phone):
     clock.set_now(at(9, 5))
     queue.open_clinic(db, None)
     v = queue.walk_in(db, None, name="Ravi Kumar", phone="+91 98400 12345")
-    assert v.state == "waiting" and v.checked_in_at == at(9, 5)
+    assert v.state == "waiting" and v.checked_in_at == at(9, 5) and v.queued_at is None
     assert len(v.link_token) == 22
     assert v.first_estimate_min == 0
     assert decrypt(v.patient_name_encrypted) == "Ravi Kumar"
     assert v.phone_last4 == "2345"
+    # On the walk-in list: can't start until a manager adds them to the queue.
+    with pytest.raises(queue.QueueError):
+        queue.start(db, None, v.id)
+    [t] = texts(db, "check_in")
+    assert "as a walk-in, 1st on the walk-in list" in t.body
+    assert "We'll text a revised time when you're added to the queue" in t.body
+
+    clock.set_now(at(9, 10))
+    queue.move_to_queue(db, None, v.id)
+    assert v.queued_at == at(9, 10)
+    [q] = texts(db, "queued")
+    assert "You've been added to the queue" in q.body and "1st in line" in q.body
+    assert "Scheduled visit time: Walk-in (checked in 9:05 am)" in q.body
+    with pytest.raises(queue.QueueError):
+        queue.move_to_queue(db, None, v.id)   # only once
 
     clock.set_now(at(9, 20))
     queue.start(db, None, v.id)
@@ -49,18 +71,18 @@ def test_walk_in_lifecycle(db, phone):
     assert v.state == "done" and v.ended_at == at(9, 32)
 
     actions = [a.action for a in db.scalars(select(AuditLog).order_by(AuditLog.id))]
-    assert actions == ["clinic_open", "walk_in", "start", "end"]
+    assert actions == ["clinic_open", "walk_in", "queue", "start", "end"]
     assert snapshot.get_day(db).last_staff_action_at == at(9, 32)
 
     [t] = texts(db, "check_in")
     assert t.status == "sent"
-    assert "1st in line" in t.body and "/w/" + v.link_token in t.body
+    assert "/w/" + v.link_token in t.body
     assert phone.sent[0][0] == "+919840012345"
     assert_no_names(db, "Ravi Kumar")
 
 
 def test_invalid_transitions(db):
-    v = queue.walk_in(db, None, name="A B", phone="9840012345")
+    v = walk_in_q(db, None, name="A B", phone="9840012345")
     with pytest.raises(queue.QueueError):
         queue.end(db, None, v.id)
     with pytest.raises(queue.QueueError):
@@ -72,9 +94,9 @@ def test_invalid_transitions(db):
 
 def test_validation(db):
     with pytest.raises(queue.QueueError):
-        queue.walk_in(db, None, name="  ", phone="9840012345")
+        walk_in_q(db, None, name="  ", phone="9840012345")
     with pytest.raises(queue.QueueError):
-        queue.walk_in(db, None, name="X", phone="12")
+        walk_in_q(db, None, name="X", phone="12")
     with pytest.raises(queue.QueueError):
         queue.book(db, None, name="X", phone="9840012345", appointment_at=at(9) - timedelta(days=1))
 
@@ -132,7 +154,7 @@ def test_edit_booking_resets_pre_arrival(db, phone):
 # --- undo -------------------------------------------------------------------
 
 def test_undo_start_within_two_minutes(db):
-    v = queue.walk_in(db, None, name="A B", phone="9840012345")
+    v = walk_in_q(db, None, name="A B", phone="9840012345")
     clock.set_now(at(9, 10))
     queue.start(db, None, v.id)
     clock.set_now(at(9, 11))
@@ -144,7 +166,7 @@ def test_undo_start_within_two_minutes(db):
 
 
 def test_undo_expires(db):
-    v = queue.walk_in(db, None, name="A B", phone="9840012345")
+    v = walk_in_q(db, None, name="A B", phone="9840012345")
     queue.no_show(db, None, v.id)
     clock.set_now(at(9, 3))
     with pytest.raises(queue.QueueError):
@@ -168,8 +190,8 @@ def test_undo_check_in_and_walk_in(db):
 def test_running_late_and_delay_texts(db, phone):
     clock.set_now(at(9))
     queue.open_clinic(db, None)
-    a = queue.walk_in(db, None, name="Anita Kumari", phone="9840000001")
-    b = queue.walk_in(db, None, name="Suresh Babu", phone="9840000002")
+    a = walk_in_q(db, None, name="Anita Kumari", phone="9840000001")
+    b = walk_in_q(db, None, name="Suresh Babu", phone="9840000002")
     c = queue.book(db, None, name="Meena Devi", phone="9840000003", appointment_at=at(10))
     assert texts(db, "pre_arrival")  # 60 min ahead: sent immediately
 
@@ -203,14 +225,14 @@ def test_running_late_new_opening_time(db):
     clock.set_now(at(8, 30))
     queue.running_late(db, None, opening_at=time(10, 30))
     assert snapshot.get_day(db).delay_until == at(10, 30)
-    v = queue.walk_in(db, None, name="A B", phone="9840000001")
+    v = walk_in_q(db, None, name="A B", phone="9840000001")
     assert v.first_estimate_min == 120
     with pytest.raises(queue.QueueError):
         queue.running_late(db, None, opening_at=time(8, 0))
 
 
 def test_first_start_marks_clinic_open(db):
-    v = queue.walk_in(db, None, name="A B", phone="9840000001")
+    v = walk_in_q(db, None, name="A B", phone="9840000001")
     clock.set_now(at(9, 5))
     queue.start(db, None, v.id)
     assert snapshot.get_day(db).opened_at == at(9, 5)
@@ -226,8 +248,8 @@ def test_doctors_and_open(db):
 
 def test_actual_wait_and_first_estimate_recorded(db):
     queue.open_clinic(db, None)
-    a = queue.walk_in(db, None, name="A B", phone="9840000001")
-    b = queue.walk_in(db, None, name="C D", phone="9840000002")
+    a = walk_in_q(db, None, name="A B", phone="9840000001")
+    b = walk_in_q(db, None, name="C D", phone="9840000002")
     assert (a.first_estimate_min, b.first_estimate_min) == (0, 15)
     clock.set_now(at(9, 2))
     queue.start(db, None, a.id)
@@ -271,10 +293,10 @@ def test_pre_arrival_not_before_lead(db):
 def test_inbound_wait(db, phone):
     clock.set_now(at(9))
     queue.open_clinic(db, None)
-    queue.walk_in(db, None, name="A B", phone="+91 98400 00001")
+    walk_in_q(db, None, name="A B", phone="+91 98400 00001")
     reply = notifier.handle_inbound(db, "+919840000002", "WAIT")
     assert reply.startswith("Walk-in wait now")
-    queue.walk_in(db, None, name="C D", phone="9840000002")
+    walk_in_q(db, None, name="C D", phone="9840000002")
     reply = notifier.handle_inbound(db, "+919840000002", "wait")
     assert "2nd in line" in reply and "C D" not in reply
     db.commit()
@@ -334,9 +356,9 @@ def test_ordinals():
 
 def test_nightly_retention(db):
     clock.set_now(at(9))
-    old = queue.walk_in(db, None, name="Old Name", phone="9840000001")
-    mid = queue.walk_in(db, None, name="Mid Name", phone="9840000002")
-    new = queue.walk_in(db, None, name="New Name", phone="9840000003")
+    old = walk_in_q(db, None, name="Old Name", phone="9840000001")
+    mid = walk_in_q(db, None, name="Mid Name", phone="9840000002")
+    new = walk_in_q(db, None, name="New Name", phone="9840000003")
     old.visit_date = (D - timedelta(days=91)).date()
     mid.visit_date = (D - timedelta(days=31)).date()
     new.visit_date = (D - timedelta(days=1)).date()
@@ -359,9 +381,10 @@ def test_nightly_retention(db):
 def test_day_totals(db):
     clock.set_now(at(9))
     t = snapshot.day_totals(db)
-    assert t == {"booked": 0, "in_clinic": 0, "completed": 0, "avg_visit": None, "avg_wait": None}
+    assert t == {"booked": 0, "in_clinic": 0, "walk_in_list": 0, "completed": 0,
+                 "avg_visit": None, "avg_wait": None}
     queue.open_clinic(db, None)
-    a = queue.walk_in(db, None, name="Ravi Kumar", phone="9840000001")        # 09:00
+    a = walk_in_q(db, None, name="Ravi Kumar", phone="9840000001")        # 09:00
     b = queue.book(db, None, name="Meena Devi", phone="9840000002", appointment_at=at(9))
     c = queue.book(db, None, name="Arun Raj", phone="9840000003", appointment_at=at(11))
     d = queue.book(db, None, name="Lata Devi", phone="9840000004", appointment_at=at(12))
@@ -385,7 +408,7 @@ def test_texts_use_gsm_characters_only(db, phone):
     """Dashes and curly quotes would force UCS-2 and more than double the SMS cost."""
     clock.set_now(at(9))
     queue.open_clinic(db, None)
-    v = queue.walk_in(db, None, name="Ravi Kumar", phone="9840000001")
+    v = walk_in_q(db, None, name="Ravi Kumar", phone="9840000001")
     queue.book(db, None, name="Meena Devi", phone="9840000002", appointment_at=at(9, 30))
     queue.start(db, None, v.id)
     notifier.handle_inbound(db, "9840000001", "WAIT")            # "It's your turn — ..."
@@ -397,3 +420,43 @@ def test_texts_use_gsm_characters_only(db, phone):
         assert not set(b) & set("–—‘’“”…"), b
     assert any("Doctor's room \"2\" - first floor..." in b for b in bodies)
     assert all(sent[1] in bodies for sent in phone.sent)
+
+
+
+# --- walk-in list -----------------------------------------------------------------
+
+def test_walk_in_list_and_move_to_queue(db, phone):
+    clock.set_now(at(9))
+    queue.open_clinic(db, None)
+    b1 = queue.book(db, None, name="Meena Devi", phone="9840000001", appointment_at=at(9))
+    b2 = queue.book(db, None, name="Arun Raj", phone="9840000002", appointment_at=at(9, 30))
+    queue.check_in(db, None, b1.id)
+    w1 = queue.walk_in(db, None, name="Ravi Kumar", phone="9840000003")
+    w2 = queue.walk_in(db, None, name="Lata Devi", phone="9840000004")
+    ests = snapshot.estimates(db)
+    # Initial estimates count only patients checked in (b1), not b2 who hasn't arrived.
+    assert ests[w1.id].walk_in_place == 1 and ests[w1.id].expected_start == at(9, 15)
+    assert ests[w2.id].walk_in_place == 2 and ests[w2.id].expected_start == at(9, 30)
+    assert ests[b2.id].expected_start == at(9, 30)      # the list doesn't hold up bookings
+    assert snapshot.day_totals(db)["walk_in_list"] == 2
+    assert snapshot.walk_in_now(db).walk_in_place == 3
+    reply = notifier.handle_inbound(db, "9840000004", "WAIT")
+    assert reply.startswith("You're 2nd on the walk-in list")
+
+    # Manager moves the second walk-in in at 9:05 (b1 not started yet, so b1 runs 9:05-9:20):
+    # they go ahead of the 9:30 booking, which now starts 9:35.
+    clock.set_now(at(9, 5))
+    queue.move_to_queue(db, None, w2.id)
+    ests = snapshot.estimates(db)
+    assert ests[w2.id].position == 2 and ests[w2.id].walk_in_place is None
+    assert ests[w2.id].expected_start == at(9, 20)
+    assert ests[b2.id].expected_start == at(9, 35)
+    # w1 is still on the list, now behind w2 as well.
+    assert ests[w1.id].walk_in_place == 1 and ests[w1.id].expected_start == at(9, 35)
+    assert w2.first_estimate_min == 20                  # 5 min waited + 15 min revised
+    [q] = texts(db, "queued")
+    assert q.visit_id == w2.id and "2nd in line" in q.body
+
+    # Undo puts them back on the list.
+    queue.undo(db, None, w2.id)
+    assert w2.queued_at is None and snapshot.estimates(db)[w2.id].walk_in_place == 2

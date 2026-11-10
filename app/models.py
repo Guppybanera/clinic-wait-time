@@ -37,6 +37,8 @@ class Visit(Base):
     checked_in_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Walk-ins: when a manager moved them from the walk-in list into the appointment queue.
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     first_estimate_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_wait_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Expected start time the patient was last told (by any text). Delay alerts compare against it.
@@ -86,7 +88,7 @@ class Notification(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id", ondelete="SET NULL"), nullable=True)
-    kind: Mapped[str] = mapped_column(String(12))  # booking / pre_arrival / check_in / delay / reply / adhoc
+    kind: Mapped[str] = mapped_column(String(12))  # booking / pre_arrival / check_in / queued / delay / reply / adhoc
     # Encrypted destination, so the outbox can retry without keeping a plain number.
     to_encrypted: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)

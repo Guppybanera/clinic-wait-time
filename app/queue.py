@@ -1,7 +1,8 @@
 """Queue service: the only code that changes visits and clinic days.
 
 State machine:  booked -> waiting -> in_visit -> done,  plus no_show and cancelled.
-Walk-ins start at waiting.
+Walk-ins start at waiting, on the walk-in list (queued_at is None). A manager moves them into
+the appointment queue (move_to_queue); only then can their visit start.
 
 Every change writes an audit entry, stamps `clinic_days.last_staff_action_at`,
 recomputes today's estimates and lets the notifier send any texts that are due.
@@ -159,6 +160,8 @@ def _transition(db: Session, staff_id: int | None, visit_id: int, action: str) -
     now = clock.now()
     if action in ("check_in", "start", "end") and v.visit_date != now.date():
         raise QueueError("This visit is not today")
+    if action == "start" and snapshot.on_walk_in_list(v):
+        raise QueueError("This walk-in is still on the walk-in list — a manager must add them to the queue first")
     from_state = v.state
     v.state = to_state
     if action == "check_in":
@@ -200,6 +203,30 @@ def walk_in(db: Session, staff_id: int | None, *, name: str, phone: str) -> Visi
     db.flush()
     _audit(db, staff_id, "walk_in", v, None, WAITING)
     _after_check_in(db, v)
+    _finish(db)
+    return v
+
+
+def move_to_queue(db: Session, staff_id: int | None, visit_id: int) -> Visit:
+    """Manager decision: move a walk-in from the walk-in list into the appointment queue.
+    They join by the time of the move (so they go after booked patients already due and
+    fill the gap before later appointments) and get a revised estimate by text."""
+    v = _visit(db, visit_id)
+    if not snapshot.on_walk_in_list(v):
+        raise QueueError("Only a walk-in on the walk-in list can be added to the queue")
+    if v.visit_date != clock.now().date():
+        raise QueueError("This visit is not today")
+    now = clock.now()
+    v.queued_at = now
+    _audit(db, staff_id, "queue", v, WAITING, WAITING)
+    db.flush()
+    e = snapshot.estimates(db).get(v.id)
+    if e is not None:
+        # Accuracy is judged on the estimate made when they joined the queue
+        # (time already waited + the revised wait), not the provisional one.
+        waited = (now - v.checked_in_at).total_seconds() / 60 if v.checked_in_at else 0
+        v.first_estimate_min = round(waited + e.wait_min)
+        notifier.on_queued(db, v, e)
     _finish(db)
     return v
 
@@ -260,6 +287,8 @@ def undo(db: Session, staff_id: int | None, visit_id: int) -> Visit:
         v.actual_wait_min = None
     elif entry.action == "end":
         v.ended_at = None
+    elif entry.action == "queue":
+        v.queued_at = None  # back on the walk-in list
     entry.undone = True
     _audit(db, staff_id, f"undo_{entry.action}", v, current, None)
     _finish(db)

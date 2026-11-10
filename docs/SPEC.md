@@ -47,9 +47,11 @@ The system has eight parts: three screens, a queue service at the centre, an est
 ### 3. Staff console (today's queue)
 
 - **Where:** a browser on the front-desk computer or tablet, at `/staff`. Each staff member signs in with their own login; the session lasts until closing. The screen should face away from the waiting room.
-- **Check in:** booked patients are checked in with one tap from the Appointments screen. Walk-ins use a short form: name, phone number, **Check in**. Either way the visit enters the queue and the patient gets a text. Target: under 10 seconds.
-- **Today so far:** a row of totals at the top — **Appointments booked** (today's bookings, not counting cancellations), **In clinic now** (checked in or in a visit), **Completed**, **Average visit time** (start to end, completed visits) and **Average wait time** (check-in to start, booked and walk-in). Averages use today's actual times and show "—" until there is one.
-- **Queue list:** one row per waiting patient showing name, phone ending, type (booked / walk-in), wait so far, and a single button — **Start visit** (or **End visit** once started). One tap per action.
+- **Check in:** booked patients are checked in with one tap from the Appointments screen. Walk-ins use a short form: name, phone number, **Check in**; they go onto the **walk-in list**, not straight into the queue (see below). Either way the patient gets a text. Target: under 10 seconds.
+- **Today so far:** a row of totals at the top — **Appointments booked** (today's bookings, not counting cancellations), **In clinic now** (checked in or in a visit, including the walk-in list), **On walk-in list**, **Completed**, **Average visit time** (start to end, completed visits) and **Average wait time** (check-in to start, booked and walk-in). Averages use today's actual times and show "—" until there is one.
+- **Walk-in list:** walk-ins are tracked separately from the appointment queue. Each row shows place on the list, name, phone, check-in time, wait so far and an *initial estimate*, which counts only patients already checked in (waiting or in a visit), with walk-ins ahead on the list after them; booked patients who haven't arrived are not counted. The patient's check-in text says they are on the walk-in list and will get a revised time.
+- **Add to queue (office manager only):** the manager decides when a walk-in joins the appointment queue. **Add to queue** places them in line as of that moment — after booked patients already due, ahead of later appointments (a booked patient who arrived early keeps their appointment-time place, so a walk-in added now can go ahead of them; decided with the clinic) — and texts a *revised estimate* ("You've been added to the queue… You're 3rd in line. Revised estimate: …"). Front-desk staff see the list but not the button. Only walk-ins in the queue can be started. **Undo** (2 minutes) puts them back on the list.
+- **Queue list:** one row per patient in the queue (booked patients checked in, and walk-ins the manager has added) showing name, phone ending, type (booked / walk-in), wait so far, and a single button — **Start visit** (or **End visit** once started). One tap per action.
 - **Clinic status:** a **Clinic open** button at the start of the day, and a **Running late** action ("opening at 10:30" or "doctor delayed 30 min") that shifts every estimate.
 - **Doctors in session:** a 1–2–3 selector so the estimate knows how many patients are seen in parallel.
 - **Housekeeping:** **No-show** and **Undo** on each row, so a mis-tap can be fixed without calling anyone.
@@ -58,7 +60,7 @@ The system has eight parts: three screens, a queue service at the centre, an est
 
 The API both screens talk to. It owns the visit state machine and is the only part that writes to the database.
 
-- **States:** `booked` → `waiting` → `in_visit` → `done`, plus `no_show` and `cancelled`. Walk-ins start at `waiting`.
+- **States:** `booked` → `waiting` → `in_visit` → `done`, plus `no_show` and `cancelled`. Walk-ins start at `waiting` on the walk-in list (`queued_at` empty); a manager's **Add to queue** sets `queued_at`.
 - **Endpoints:** `POST /api/appointments`, `PATCH /api/appointments/{id}`, `GET /api/appointments?date=`, `POST /api/visits` (walk-in check-in), `POST /api/visits/{id}/check-in` (booked patient arrives), `POST /api/visits/{id}/start`, `POST /api/visits/{id}/end`, `POST /api/visits/{id}/no-show`, `POST /api/clinic/open`, `POST /api/clinic/delay`, `GET /api/queue` (staff), `GET /api/w/{token}` (patient), `POST /api/sms/inbound` (provider webhook).
 - **After every state change:** writes the change and an audit entry, then calls the estimator to recompute every booked and waiting patient's estimate for today, then hands any changed estimates to the notifier.
 
@@ -86,7 +88,8 @@ Decides who gets a text and sends it through the SMS provider.
   *Estimated delay* is the expected start minus the appointment, to the nearest 5 minutes; when there is none it reads "None, on time". Walk-ins have no scheduled time, so they get "Scheduled visit time: Walk-in (checked in 5:12 pm)" and "Estimated wait: about 20–35 min" in place of the delay line.
 - **Plain characters only:** texts use the basic SMS alphabet. Typographic dashes, curly quotes and "…" (including any a manager types) are swapped for plain ones before sending, because a single such character makes the provider send the whole text in Unicode, at 70 characters per message instead of 160: the delay text above bills as 2 messages instead of 5.
 - **Pre-arrival (booked patients):** about 90 minutes before the appointment, opening "Your visit at \[Clinic\]:".
-- **On check-in:** opening "You're checked in at \[Clinic\]. You're 3rd in line.". Walk-ins get their link here.
+- **On check-in:** opening "You're checked in at \[Clinic\]. You're 3rd in line.". Walk-ins get their link here, with "You're checked in at \[Clinic\] as a walk-in, 2nd on the walk-in list. We'll text a revised time when you're added to the queue." and their initial estimate.
+- **Added to the queue (walk-ins):** "You've been added to the queue at \[Clinic\]. You're 3rd in line. Revised estimate:" followed by the three lines.
 - **On a worse estimate:** if a patient's expected start time is more than 15 minutes later than the last one they were told (by any text), sends the delay text above. This covers late opening and doctor delays too.
 - **Limits:** at most one delay text per patient every 15 minutes, none during quiet hours (8 pm–7 am by default; pre-arrival texts due then are deferred to 7 am), and none to a patient expected to be seen within the next 15 minutes anyway, so a busy afternoon doesn't produce a flood of texts.
 - **Delivery:** a background job runs every minute, sends pre-arrival texts that are due, and retries any queued or failed sends.
@@ -96,7 +99,7 @@ Decides who gets a text and sends it through the SMS provider.
 - **Outbound:** booking confirmations, pre-arrival texts, check-in texts, delay alerts, WAIT replies and manager-written texts.
 - **Development outbox:** with `DEV_MODE` on, texts are not sent but listed at `/dev/outbox` (staff login required) with the patient's **name** and **complete phone number** ("To"), kind, status and body, so staff can check exactly who would have been texted what. It is never available in production.
 - **Inbound:** any patient — smartphone with no data, or basic phone — texts "WAIT" to the clinic number. The provider calls `/api/sms/inbound`, and the reply uses the same three-line layout (scheduled time, estimated delay or wait, estimated time) and the note.
-- **Walk-in check before travelling:** someone with no booking can text "WAIT" and get the current walk-in wait ("Walk-in wait now: about 40–55 min").
+- **Walk-in check before travelling:** someone with no booking can text "WAIT" and get the initial wait a new walk-in would have — the end of the walk-in list, behind everyone checked in ("Walk-in wait now: about 40–55 min").
 
 ### 8. Database
 
@@ -183,11 +186,11 @@ In words: any wait for the clinic to open, plus the time left on visits in progr
 - **Range:** low = W − 7, high = W + 8, both rounded to the nearest 5 minutes, low never below 0. That keeps the range at 15 minutes, the requirement's maximum.
 - **Checked-in patients** see position (k + 1, "3rd in line") and the wait range.
 - **Booked patients not yet arrived** see an expected start time: the later of their appointment time and now + W, shown as a 15-minute clock range ("about 10:45–11:00"). A booked patient is never told to come earlier than their appointment.
-- **Queue order (v1):** booked patients by appointment time once checked in; walk-ins by check-in time, filling gaps between appointments. Exactly how walk-ins slot in is an open question for the clinic.
+- **Queue order:** booked patients by appointment time; walk-ins the manager has added, by the time they were added, filling gaps between appointments. Walk-ins still on the walk-in list are not in the queue: each gets an initial estimate as if they followed everyone currently checked in (waiting or in a visit), in check-in order. They don't push back anyone in the queue.
 
 **How the estimator applies the formula**
 
-The estimator is a small simulation rather than the bare formula. Each of the D doctors becomes free at some time (now plus r for a visit in progress, or now plus S if the clinic hasn't started). Patients are taken in queue order — booked patients by appointment time, walk-ins by check-in time — and each starts when the earliest doctor is free, and, for a booked patient who hasn't arrived, not before their appointment. That doctor is then busy for A minutes. When everyone ahead is already in the waiting room this gives exactly W = S + (Σr + k·A)/D; it also handles gaps between appointments (walk-ins fill them) and booked patients who haven't arrived yet. A booked patient more than 30 minutes past their appointment who hasn't arrived no longer holds a place: they're estimated at the back of the line. There is one queue for the whole clinic.
+The estimator is a small simulation rather than the bare formula. Each of the D doctors becomes free at some time (now plus r for a visit in progress, or now plus S if the clinic hasn't started). Patients are taken in queue order — booked patients by appointment time, walk-ins by the time the manager added them — and each starts when the earliest doctor is free, and, for a booked patient who hasn't arrived, not before their appointment. That doctor is then busy for A minutes. When everyone ahead is already in the waiting room this gives exactly W = S + (Σr + k·A)/D; it also handles gaps between appointments (walk-ins fill them) and booked patients who haven't arrived yet. A booked patient more than 30 minutes past their appointment who hasn't arrived no longer holds a place: they're estimated at the back of the line. Walk-ins still on the walk-in list are then run once more, after only the patients waiting or in a visit, to give their initial estimate. There is one queue for the whole clinic.
 
 **Measuring accuracy (the ±15 min, 80% target)**
 
@@ -202,7 +205,7 @@ Six tables. Name and phone are the only personal details; both are encrypted, sh
 
 | Table | Key fields | Purpose | Kept for |
 | --- | --- | --- | --- |
-| `visits` | `id`, `patient_name_encrypted`, `phone_encrypted`, `appointment_at` (empty for walk-ins), `doctor`, `type` (booked / walk-in), `state` (booked / waiting / in\_visit / done / no\_show / cancelled), `link_token` (random, 128-bit), `pre_arrival_sent_at`, `checked_in_at`, `started_at`, `ended_at`, `first_estimate_min`, `actual_wait_min`, `last_notified_start_at`, `last_delay_text_at`, `phone_hash` (keyed hash of the last 10 digits, for matching WAIT texts), `phone_last4` | One row per appointment or walk-in; drives the Appointments screen, the queue and the patient page | Link token cleared at midnight on the visit day; name and phone deleted after 30 days; timing fields kept 90 days for accuracy reporting |
+| `visits` | `id`, `patient_name_encrypted`, `phone_encrypted`, `appointment_at` (empty for walk-ins), `doctor`, `type` (booked / walk-in), `state` (booked / waiting / in\_visit / done / no\_show / cancelled), `link_token` (random, 128-bit), `pre_arrival_sent_at`, `checked_in_at`, `queued_at` (walk-ins: when the manager added them to the queue), `started_at`, `ended_at`, `first_estimate_min`, `actual_wait_min`, `last_notified_start_at`, `last_delay_text_at`, `phone_hash` (keyed hash of the last 10 digits, for matching WAIT texts), `phone_last4` | One row per appointment or walk-in; drives the Appointments screen, the queue and the patient page | Link token cleared at midnight on the visit day; name and phone deleted after 30 days; timing fields kept 90 days for accuracy reporting |
 | `clinic_days` | `date`, `opening_time`, `closing_time`, `opened_at`, `delay_until`, `doctors_expected`, `doctors_in_session`, `last_staff_action_at` | Each day's opening, late-start and staffing, used by the estimator | 90 days |
 | `clinic_config` | `default_visit_min`, `slot_length_min`, `default_opening_time`, `pre_arrival_lead_min` (90), `alert_threshold_min` (15), `quiet_hours`, `clinic_sms_number`, `clinic_phone` | Settings the manager can change without code | Permanent |
 | `notifications` | `id`, `visit_id`, `kind` (booking / pre-arrival / check-in / delay / reply / adhoc), `status` (queued / sent / failed), `attempts`, `sent_at` | Outbox for the notifier; lets failed texts retry | 30 days |
@@ -269,7 +272,8 @@ Every measurable line in the product requirement maps to a part of this design a
 ## Open questions
 
 - [ ] Which country is the clinic in? This decides the privacy law (HIPAA, India's DPDP Act, etc.) and the SMS provider.
-- [ ] How should walk-ins be ordered alongside booked patients: strictly by arrival, or slotted into gaps between appointments?
+- [x] How should walk-ins be ordered alongside booked patients? Decided: a separate walk-in list; the office manager adds each walk-in to the queue, where they join as of that moment.
+- [ ] Should front-desk staff also be able to add walk-ins to the queue when no manager is signed in?
 - [ ] Is there one queue for the whole clinic, or one per doctor?
 - [ ] How long do most patients take to reach the clinic? This sets the pre-arrival lead time (90 min is a placeholder).
 - [ ] What slot length do bookings use today (10, 15, 20 min)?

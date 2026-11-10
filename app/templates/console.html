@@ -17,6 +17,7 @@ setInterval(function(){
 <div class="stats" aria-label="Today so far">
   <div class="stat"><b>{{ totals.booked }}</b><span>Appointments booked</span></div>
   <div class="stat"><b>{{ totals.in_clinic }}</b><span>In clinic now</span></div>
+  <div class="stat"><b>{{ totals.walk_in_list }}</b><span>On walk-in list</span></div>
   <div class="stat"><b>{{ totals.completed }}</b><span>Completed</span></div>
   <div class="stat"><b>{% if totals.avg_visit is not none %}{{ totals.avg_visit|round|int }} min{% else %}—{% endif %}</b><span>Average visit time</span></div>
   <div class="stat"><b>{% if totals.avg_wait is not none %}{{ totals.avg_wait|round|int }} min{% else %}—{% endif %}</b><span>Average wait time</span></div>
@@ -59,10 +60,10 @@ setInterval(function(){
     <input type="tel" name="phone" placeholder="Phone" required autocomplete="off">
     <button>Check in</button>
   </form>
-  <p class="muted">Walk-in wait now: about {{ walk_in_wait.low_min }}–{{ walk_in_wait.high_min }} min</p>
+  <p class="muted">Walk-ins join the walk-in list. Initial wait for a new walk-in: about {{ walk_in_wait.low_min }}–{{ walk_in_wait.high_min }} min{% if not is_manager(user) %} · a manager adds them to the queue{% endif %}</p>
 </div>
 
-<h2>In the clinic ({{ in_room|length }})</h2>
+<h2>In the queue ({{ in_room|length }})</h2>
 {% if in_room %}
 <table>
 <tr><th>#</th><th>Name</th><th>Phone</th><th>Type</th><th>Wait so far</th><th>Estimate</th><th></th></tr>
@@ -72,7 +73,7 @@ setInterval(function(){
   <td>{% if v.state == 'in_visit' %}—{% else %}{{ e.position if e else '' }}{% endif %}</td>
   <td><strong>{{ full_name(v) }}</strong></td>
   <td>{{ phone_for(v, user) }}</td>
-  <td>{{ 'Booked ' ~ (v.appointment_at|hm) if v.appointment_at else 'Walk-in' }}</td>
+  <td>{{ 'Booked ' ~ (v.appointment_at|hm) if v.appointment_at else 'Walk-in, added ' ~ (v.queued_at|hm) if v.queued_at else 'Walk-in' }}</td>
   <td>{% if v.state == 'in_visit' %}In visit {{ ((now - v.started_at).total_seconds() // 60)|int }} min
       {% if v.id in overrun %}<br><b>Still in progress?</b>{% endif %}
       {% else %}{{ ((now - v.checked_in_at).total_seconds() // 60)|int }} min{% endif %}</td>
@@ -90,7 +91,32 @@ setInterval(function(){
 </tr>
 {% endfor %}
 </table>
-{% else %}<p class="muted">Nobody checked in.</p>{% endif %}
+{% else %}<p class="muted">Nobody in the queue.</p>{% endif %}
+
+<h2>Walk-in list ({{ walk_in_list|length }})</h2>
+{% if walk_in_list %}
+<p class="muted" style="margin-top:-6px">Not in the queue yet. Their estimate counts only patients already checked in{% if is_manager(user) %}; <b>Add to queue</b> places them in line now and texts a revised time{% endif %}.</p>
+<table>
+<tr><th>#</th><th>Name</th><th>Phone</th><th>Checked in</th><th>Wait so far</th><th>Initial estimate</th><th></th></tr>
+{% for v in walk_in_list %}
+{% set e = ests.get(v.id) %}
+<tr>
+  <td>{{ e.walk_in_place if e else '' }}</td>
+  <td><strong>{{ full_name(v) }}</strong></td>
+  <td>{{ phone_for(v, user) }}</td>
+  <td>{{ v.checked_in_at|hm }}</td>
+  <td>{{ ((now - v.checked_in_at).total_seconds() // 60)|int }} min</td>
+  <td>{% if e %}{{ e.low_min }}–{{ e.high_min }} min{% endif %}</td>
+  <td><div class="row-actions">
+    {% if is_manager(user) %}<form method="post" action="/staff/visits/{{ v.id }}/queue"><button>Add to queue</button></form>{% endif %}
+    <form method="post" action="/staff/visits/{{ v.id }}/no-show"><button class="warn small">No-show</button></form>
+    {% if v.id in undo %}<form method="post" action="/staff/visits/{{ v.id }}/undo"><button class="alt small">Undo</button></form>{% endif %}
+    {% if is_manager(user) %}<a class="btn alt small" href="/staff/sms?visit={{ v.id }}">Text</a>{% endif %}
+  </div></td>
+</tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No walk-ins waiting to be added.</p>{% endif %}
 
 {% if recent %}
 <h2>Just finished</h2>

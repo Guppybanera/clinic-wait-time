@@ -70,7 +70,9 @@ def console(request: Request, db: Session = Depends(get_db), user: StaffUser = D
     db.commit()
     ests = snapshot.estimates(db)
     visits = snapshot.active_visits(db, day.day)
-    in_room = [v for v in visits if v.state in (WAITING, IN_VISIT)]
+    walk_in_list = sorted((v for v in visits if snapshot.on_walk_in_list(v)),
+                          key=lambda v: (v.checked_in_at, v.id))
+    in_room = [v for v in visits if v.state in (WAITING, IN_VISIT) and not snapshot.on_walk_in_list(v)]
     in_room.sort(key=lambda v: (v.state != IN_VISIT, ests[v.id].position if v.id in ests else 0,
                                 v.started_at or datetime.min))
     arriving = sorted((v for v in visits if v.state == BOOKED), key=lambda v: v.appointment_at)
@@ -82,6 +84,7 @@ def console(request: Request, db: Session = Depends(get_db), user: StaffUser = D
     n_acc, pct = jobs.accuracy(db)
     return templates.TemplateResponse(request, "console.html", {
         "user": user, "now": now, "day": day, "ests": ests, "in_room": in_room, "arriving": arriving,
+        "walk_in_list": walk_in_list,
         "recent": recent, "avg": avg, "totals": snapshot.day_totals(db, day.day),
         "not_open_late": day.opened_at is None and now > opening,
         "overrun": {v.id for v in in_room if v.state == IN_VISIT and v.started_at
@@ -98,6 +101,14 @@ def walk_in(request: Request, name: str = Form(""), phone: str = Form(""),
             db: Session = Depends(get_db), user: StaffUser = Depends(auth.current_staff)):
     _act(request, queue.walk_in, db, user.id, name=name, phone=phone)
     return back("/staff")
+
+
+@router.post("/staff/visits/{visit_id}/queue")
+def visit_queue(visit_id: int, request: Request, next: str = Form("/staff"),
+                db: Session = Depends(get_db), user: StaffUser = Depends(auth.manager)):
+    """Manager only: move a walk-in from the walk-in list into the appointment queue."""
+    _act(request, queue.move_to_queue, db, user.id, visit_id)
+    return back(_safe_next(next))
 
 
 @router.post("/staff/visits/{visit_id}/{action}")

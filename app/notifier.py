@@ -115,9 +115,22 @@ def pre_arrival_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
     return _estimate_text(cfg, v, e, f"Your visit at {cfg.clinic_name}:")
 
 
+def _list_place(e: Estimate) -> str:
+    return f"{ordinal(e.walk_in_place)} on the walk-in list"
+
+
 def check_in_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
+    if e.walk_in_place:
+        return _estimate_text(cfg, v, e, f"You're checked in at {cfg.clinic_name} as a walk-in, "
+                                         f"{_list_place(e)}. We'll text a revised time when "
+                                         f"you're added to the queue.")
     return _estimate_text(cfg, v, e, f"You're checked in at {cfg.clinic_name}. "
                                      f"You're {ordinal(e.position or 1)} in line.")
+
+
+def queued_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
+    return _estimate_text(cfg, v, e, f"You've been added to the queue at {cfg.clinic_name}. "
+                                     f"You're {ordinal(e.position or 1)} in line. Revised estimate:")
 
 
 def delay_text(cfg: ClinicConfig, v: Visit, e: Estimate) -> str:
@@ -131,6 +144,8 @@ def status_reply(cfg: ClinicConfig, v: Visit | None, e: Estimate | None) -> str:
         return "It's your turn — please come to the front desk."
     if v.state == BOOKED:
         return _estimate_text(cfg, v, e, f"Your visit at {cfg.clinic_name}:", wait=False)
+    if e.walk_in_place:
+        return _estimate_text(cfg, v, e, f"You're {_list_place(e)} at {cfg.clinic_name}.", wait=False)
     return _estimate_text(cfg, v, e, f"You're {ordinal(e.position or 1)} in line at {cfg.clinic_name}.",
                           wait=False)
 
@@ -168,6 +183,13 @@ def on_book(db: Session, v: Visit) -> None:
     asked for the appointment (usually on the phone with staff)."""
     cfg = snapshot.get_config(db)
     _send(db, v, "booking", booking_text(cfg, v))
+
+
+def on_queued(db: Session, v: Visit, e: Estimate) -> None:
+    """Walk-in moved into the queue: tell them their revised time."""
+    cfg = snapshot.get_config(db)
+    if _send(db, v, "queued", queued_text(cfg, v, e)):
+        v.last_notified_start_at = e.expected_start
 
 
 def send_pre_arrival(db: Session, v: Visit, e: Estimate) -> bool:

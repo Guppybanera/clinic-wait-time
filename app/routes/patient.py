@@ -58,6 +58,11 @@ def patient_status(db: Session, token: str) -> dict:
     if v.state == BOOKED:
         return {**base, "kind": "booked", "headline": f"Expected to be seen about {notifier.clock_range(e)}",
                 "sub": "Estimate", "note": note}
+    if e.walk_in_place:
+        return {**base, "kind": "waiting",
+                "headline": f"{notifier.ordinal(e.walk_in_place)} on the walk-in list",
+                "sub": notifier.wait_str(e),
+                "note": note or "Staff will add you to the queue; your time may change then."}
     return {**base, "kind": "waiting", "headline": f"{notifier.ordinal(e.position or 1)} in line",
             "sub": notifier.wait_str(e), "note": note}
 

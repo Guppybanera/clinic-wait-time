@@ -10,7 +10,7 @@ not arrived yet.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 RANGE_WIDTH = 15          # minutes; the requirement's maximum
@@ -32,6 +32,13 @@ class VisitInput:
     appointment_at: datetime | None
     checked_in_at: datetime | None
     started_at: datetime | None
+    # Walk-ins only: when a manager moved them from the walk-in list into the queue.
+    # None = still on the walk-in list (estimated separately, after everyone checked in).
+    queued_at: datetime | None = None
+
+    @property
+    def on_walk_in_list(self) -> bool:
+        return self.state == "waiting" and not self.is_booked and self.queued_at is None
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,7 @@ class Estimate:
     expected_start: datetime         # now + W
     start_low: datetime              # clock range, rounded to 5 minutes
     start_high: datetime
+    walk_in_place: int | None = None  # place on the walk-in list (1 = first), if on it
 
 
 def round5(x: float) -> int:
@@ -98,13 +106,35 @@ def start_offset(day: DayInput) -> float:
 
 
 def queue_key(v: VisitInput) -> datetime:
-    """Booked patients keep their appointment time; walk-ins go by check-in time and fill gaps."""
+    """Booked patients keep their appointment time; walk-ins moved into the queue go by the time
+    they were moved (falling back to check-in time) and fill gaps."""
     if v.is_booked and v.appointment_at is not None:
         return v.appointment_at
-    return v.checked_in_at or datetime.max
+    return v.queued_at or v.checked_in_at or datetime.max
 
 
 def estimate_all(day: DayInput, visits: list[VisitInput]) -> dict[int, Estimate]:
+    """Estimates for the appointment queue, plus the walk-in list.
+
+    The queue (booked patients and walk-ins a manager has moved in) is simulated as a whole.
+    Walk-ins still on the walk-in list get an initial estimate based only on the patients
+    already checked in: they are placed after everyone waiting or in a visit, in check-in order.
+    """
+    holding = sorted((v for v in visits if v.on_walk_in_list),
+                     key=lambda v: (v.checked_in_at or datetime.max, v.id))
+    main = [v for v in visits if not v.on_walk_in_list]
+    results = _simulate(day, main)
+    if holding:
+        present = [v for v in main if v.state in ("waiting", "in_visit")]
+        tail = _simulate(day, present, tail=holding)
+        for place, v in enumerate(holding, 1):
+            results[v.id] = replace(tail[v.id], position=None, walk_in_place=place)
+    return results
+
+
+def _simulate(day: DayInput, visits: list[VisitInput],
+              tail: list[VisitInput] = ()) -> dict[int, Estimate]:
+    """Run the queue: `visits` in queue order, then `tail` in the order given."""
     now = day.now
     A = average_visit(day)
     D = doctors(day)
@@ -131,6 +161,7 @@ def estimate_all(day: DayInput, visits: list[VisitInput]) -> dict[int, Estimate]
     queue = sorted((v for v in visits if v.state in ("waiting", "booked") and v.id not in overdue_ids),
                    key=lambda v: (queue_key(v), v.id))
     queue += sorted(overdue, key=lambda v: (v.appointment_at, v.id))
+    queue += list(tail)
 
     results: dict[int, Estimate] = {}
     position = 0
@@ -167,8 +198,9 @@ def estimate_all(day: DayInput, visits: list[VisitInput]) -> dict[int, Estimate]
 
 def walk_in_estimate(day: DayInput, visits: list[VisitInput]) -> Estimate:
     """What a walk-in arriving now could expect (for WAIT texts from numbers with no visit)."""
+    # A new walk-in joins the end of the walk-in list (behind anyone checked in this minute).
     probe = VisitInput(id=-1, state="waiting", is_booked=False, appointment_at=None,
-                       checked_in_at=day.now, started_at=None)
+                       checked_in_at=datetime.max, started_at=None, queued_at=None)
     return estimate_all(day, visits + [probe])[-1]
 
 
